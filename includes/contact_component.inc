@@ -939,7 +939,7 @@ function wf_crm_tokeninput_path() {
   if (!$ret) {
     // First see if the library is installed in Backdrop
     $path = libraries_get_path('tokeninput');
-    if ($path && is_file(DRUPAL_ROOT . '/' . $path . '/src/jquery.tokeninput.js')) {
+    if ($path && is_file(BACKDROP_ROOT . '/' . $path . '/src/jquery.tokeninput.js')) {
       $ret = $path . '/src/jquery.tokeninput.js';
     }
     // If not, fall back on using the copy shipped with CiviCRM

@@ -13,6 +13,11 @@ Installation & Getting Started
 settings.
 - Customize the webform settings for your new fields however you wish.
 
+Version Compatibility
+---------------------
+
+This module's 1.x version is compatible with Webform 1.x and CiviCRM 4.7 for Backdrop CMS.
+
 Documentation
 -------------
 
@@ -29,6 +34,7 @@ Current Maintainers
 -------------------
 
 - Jack Aponte (https://github.com/jackaponte/)
+- Herb v/d Dool (https://github.com/herbdool)
 
 Credits
 -------

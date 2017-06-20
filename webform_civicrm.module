@@ -16,6 +16,32 @@ define('WEBFORM_CIVICRM_CIVICRM_VERSION_MAX', FALSE);
 define('WEBFORM_CIVICRM_WEBFORM_VERSION', '1.x-1.1.0');
 
 /**
+ * Implements hook_config_info().
+ */
+function webform_civicrm_config_info() {
+  $prefixes['webform_civicrm.settings'] = array(
+    'label' => t('Webform CiviCRM settings'),
+    'group' => t('Configuration'),
+  );
+  return $prefixes;
+}
+
+/**
+ * Implements hook_autoload_info().
+ */
+function webform_civicrm_autoload_info() {
+  return array(
+    'wf_crm_webform_base' => 'includes/wf_crm_webform_base.inc',
+    'wf_crm_webform_preprocess' => 'includes/wf_crm_webform_preprocess.inc',
+    'wf_crm_webform_postprocess' => 'includes/wf_crm_webform_postprocess.inc',
+    'wf_crm_admin_help' => 'includes/wf_crm_admin_help.inc',
+    'wf_crm_webform_ajax' => 'includes/wf_crm_webform_ajax.inc',
+    'wf_crm_admin_form' => 'includes/wf_crm_admin_form.inc',
+    'wf_crm_admin_component' => 'includes/wf_crm_admin_component.inc',
+  );
+}
+
+/**
  * Implements hook_menu().
  *
  * @return array
