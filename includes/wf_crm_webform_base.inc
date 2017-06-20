@@ -107,7 +107,7 @@ abstract class wf_crm_webform_base {
         }
         $result = wf_civicrm_api($ent, 'get', $params);
         // Handle location field sorting
-        if(in_array($ent, wf_crm_location_fields())){
+        if (in_array($ent, wf_crm_location_fields()) && $ent != 'website') {
           $result['values'] = $this->reorderByLocationType($c, $ent, $result['values']);
         }
         if (!empty($result['values'])) {
@@ -129,6 +129,10 @@ abstract class wf_crm_webform_base {
                   $result[1]['privacy'][] = $key;
                 }
               }
+            }
+            // User id
+            if (isset($this->enabled[$prefix . 'contact_user_id'])) {
+              $result[1]['user_id'] = wf_crm_user_cid($cid, 'contact');
             }
             // Hack for gender as textfield. More general solution needed for all pseudoconsant fields
             $gender_field = $this->getComponent("civicrm_{$c}_contact_1_contact_gender_id");
@@ -221,6 +225,83 @@ abstract class wf_crm_webform_base {
   }
 
   /**
+   * Find an existing contact based on matching criteria
+   * Used to populate a webform existing contact field
+   *
+   * @param array $component
+   *   Webform component of type 'civicrm_contact'
+   */
+  protected function findContact($component) {
+    module_load_include('inc', 'webform_civicrm', 'includes/contact_component');
+    list(, $c,) = explode('_', $component['form_key'], 3);
+    $filters = wf_crm_search_filters($this->node, $component);
+    // Start with the url - that trumps everything.
+    if (isset($_GET["cid$c"]) || ($c == 1 && isset($_GET['cid']))) {
+      $cid = isset($_GET["cid$c"]) ? $_GET["cid$c"] : $_GET['cid'];
+      if (wf_crm_is_positive($cid) || $cid === '0' || $cid === 0) {
+        $cid = (int) $cid;
+        if ($cid === 0) {
+          $this->ent['contact'][$c]['id'] = $cid;
+          return;
+        }
+        // This property may not exist in components created before v4.12 so default to TRUE if not set
+        elseif (wf_crm_aval($component['extra'], 'allow_url_autofill', TRUE, TRUE)) {
+          if (wf_crm_contact_access($component, $filters, $cid) !== FALSE) {
+            $this->ent['contact'][$c]['id'] = $cid;
+          }
+        }
+      }
+    }
+    if (empty($this->ent['contact'][$c]['id'])) {
+      $found = array();
+      switch ($component['extra']['default']) {
+        case 'user':
+          $cid = wf_crm_user_cid();
+          $found = ($c == 1 && $cid) ? array($cid) : array();
+          break;
+        case 'contact_id':
+          if ($component['extra']['default_contact_id']) {
+            $found = array($component['extra']['default_contact_id']);
+          }
+          break;
+        case 'relationship':
+          if (!empty($this->ent['contact'][1]['id'])) {
+            $found = wf_crm_find_relations($this->ent['contact'][1]['id'], $component['extra']['default_relationship']);
+          }
+          break;
+        case 'auto':
+          $component['extra']['allow_create'] = FALSE;
+          $found = array_keys(wf_crm_contact_search($this->node, $component, $filters));
+          break;
+      }
+      if ($component['extra']['randomize']) {
+        shuffle($found);
+      }
+      if (in_array($component['extra']['default'], array('user', 'contact_id'))) {
+        $dupes_allowed = TRUE;
+      }
+      else {
+        $dupes_allowed = $component['extra']['dupes_allowed'];
+      }
+      foreach ($found as $cid) {
+        // Don't pick the same contact twice unless explicitly told to do so
+        if (!$dupes_allowed) {
+          foreach($this->ent['contact'] as $contact) {
+            if (!empty($contact['id']) && $cid == $contact['id']) {
+              continue 2;
+            }
+          }
+        }
+        // Check filters except for 'auto' which already applied them
+        if ($component['extra']['default'] == 'auto' || wf_crm_contact_access($component, $filters, $cid) !== FALSE) {
+          $this->ent['contact'][$c]['id'] = $cid;
+          break;
+        }
+      }
+    }
+  }
+
+  /**
    * Reorder returned results according to settings chosen in wf_civicrm backend
    *
    * @param integer $c
@@ -264,7 +345,7 @@ abstract class wf_crm_webform_base {
       foreach($values as $key => $value){
         if((in_array($ent, array('address', 'email')) && $value['location_type_id'] == $setting['location_type_id'])
            ||
-          ($value['location_type_id'] == $setting['location_type_id'] && $value[$ent.'_type_id'] == $setting[$ent.'_type_id'])     
+          ($value['location_type_id'] == $setting['location_type_id'] && $value[$ent.'_type_id'] == $setting[$ent.'_type_id'])
           ){
             $reorderedArray[$key] = $value;
             $valueFound = true;
@@ -336,6 +417,10 @@ abstract class wf_crm_webform_base {
    */
   protected function getRelationship($r_types, $cid1, $cid2) {
     $found = array();
+    $active_clause = '';
+    if (!empty($this->settings['create_new_relationship'])) {
+      $active_clause = 'AND is_active = 1 AND end_date >= now()';
+    }
     if ($r_types && $cid1 && $cid2) {
       $types = array();
       foreach ($r_types as $r_type) {
@@ -344,7 +429,7 @@ abstract class wf_crm_webform_base {
       }
       $sql = "SELECT * FROM civicrm_relationship
       WHERE relationship_type_id IN (" . implode(',', $types) . ")
-      AND ((contact_id_a = $cid1 AND contact_id_b = $cid2) OR (contact_id_a = $cid2 AND contact_id_b = $cid1))
+      AND ((contact_id_a = $cid1 AND contact_id_b = $cid2) OR (contact_id_a = $cid2 AND contact_id_b = $cid1)) $active_clause
       ORDER BY is_active DESC, IF(end_date, 1, 0), end_date DESC";
       $dao = CRM_Core_DAO::executeQuery($sql);
       while ($dao->fetch()) {
@@ -658,7 +743,7 @@ abstract class wf_crm_webform_base {
   }
 
   /**
-   * CiviCRM JS can't be attached to a drupal form so have to manually re-add this during validation
+   * CiviCRM JS can't be attached to a Backdrop form so have to manually re-add this during validation
    *
    * @return int|null
    */
@@ -671,12 +756,12 @@ abstract class wf_crm_webform_base {
   }
 
   /**
-   * Copies a drupal file into the Civi file system
+   * Copies a Backdrop file into the Civi file system
    *
-   * @param int $id: drupal file id
+   * @param int $id: Backdrop file id
    * @return int|null Civi file id
    */
-  static function saveDrupalFileToCivi($id) {
+  public static function saveBackdropFileToCivi($id) {
     $file = file_load($id);
     if ($file) {
       $config = CRM_Core_Config::singleton();
@@ -728,13 +813,13 @@ abstract class wf_crm_webform_base {
   }
 
   /**
-   * Fetch the public url of a file in the Drupal file system
+   * Fetch the public url of a file in the Backdrop file system
    *
-   * @param int $id Drupal file id
+   * @param int $id Backdrop file id
    *
    * @return string|bool: url of file if found
    */
-  function getDrupalFileUrl($id) {
+  function getBackdropFileUrl($id) {
     $file = file_load($id);
     return $file ? file_create_url($file->uri) : FALSE;
   }
