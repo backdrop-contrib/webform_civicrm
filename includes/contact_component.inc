@@ -59,7 +59,7 @@ function _webform_edit_civicrm_contact($component) {
   $form = array();
   $node = node_load($component['nid']);
   if (empty($node->webform_civicrm) && node_is_page($node)) {
-    drupal_set_message(t('CiviCRM processing is not enabled for this webform.'), 'error');
+    backdrop_set_message(t('CiviCRM processing is not enabled for this webform.'), 'error');
     return $form;
   }
   list($contact_types, $sub_types) = wf_crm_get_contact_types();
@@ -72,7 +72,7 @@ function _webform_edit_civicrm_contact($component) {
 
   // Load scripts & css
   $form['#attached']['js'][] = wf_crm_tokeninput_path();
-  $form['#attached']['js'][] = drupal_get_path('module', 'webform_civicrm') . '/js/webform_civicrm_admin.js';
+  $form['#attached']['js'][] = backdrop_get_path('module', 'webform_civicrm') . '/js/webform_civicrm_admin.js';
   CRM_Core_Resources::singleton()->addCoreResources();
   $form['#suffix'] = wf_crm_admin_help::helpTemplate();
   $callback_path = '"' . url('webform-civicrm/js/' . $node->nid . '-' . $component['cid'], array('alias' => TRUE, 'query' => array('admin' => 1))) . '"';
@@ -90,8 +90,8 @@ function _webform_edit_civicrm_contact($component) {
     $("#default-contact-id").tokenInput(' . $callback_path . ', ' . $settings . ');
   });';
   $form['#attached']['js'][$js] = array('type' => 'inline');
-  $form['#attached']['css'][] = drupal_get_path('module', 'webform_civicrm') . '/css/token-input.css';
-  $form['#attached']['js'][] = drupal_get_path('module', 'webform_civicrm') . '/js/contact_component.js';
+  $form['#attached']['css'][] = backdrop_get_path('module', 'webform_civicrm') . '/css/token-input.css';
+  $form['#attached']['js'][] = backdrop_get_path('module', 'webform_civicrm') . '/js/contact_component.js';
 
   $form['display']['widget'] = array(
     '#type' => 'select',
@@ -347,16 +347,19 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
       '#translatable' => array('title', 'description'),
       '#theme_wrappers' => array('webform_element'),
     );
-    // See if there are any fields to fetch via ajax
-    $other_fields = wf_crm_contact_fields($node, $c);
-    if ($hide_method == 'hide') {
-      foreach ($hide_fields as $h) {
-        unset($other_fields[$h]);
-      }
-    }
-    $ajax = $other_fields ? 'true' : 'false';
   }
+  // See if there are any fields to fetch via ajax
+  $other_fields = wf_crm_contact_fields($node, $c);
+  if ($hide_method == 'hide') {
+    foreach ($hide_fields as $h) {
+      unset($other_fields[$h]);
+    }
+  }
+  $ajax = $other_fields ? 'true' : 'false';
   $callback_path = '"' . url('webform-civicrm/js/' . $node->nid . '-' . $component['cid'], array('alias' => TRUE)) . '"';
+  $onChange = "field.change(function() {
+                  wfCivi.existingSelect($c, {$node->nid}, $callback_path, toHide, '$hide_method', $no_hide_blank, \$(this).val(), $ajax);
+                });";
 
   // Render component based on type
   switch ($component['extra']['widget']) {
@@ -364,19 +367,18 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
     case 'autocomplete':
       if ($node && isset($node->webform_civicrm)) {
         $element['#attached']['js'][] = wf_crm_tokeninput_path();
-        $element['#attached']['css'][] = drupal_get_path('module', 'webform_civicrm') . '/css/token-input.css';
+        $element['#attached']['css'][] = backdrop_get_path('module', 'webform_civicrm') . '/css/token-input.css';
         $settings = '{
           queryParam: "str",
           hintText: ' . json_encode(filter_xss($component['extra']['search_prompt'])) . ',
           noResultsText: ' . json_encode(filter_xss($component['extra']['none_prompt'])) . ',
           searchingText: ' . json_encode(t('Searching...')) . ',
           tokenLimit: 1,
-          onAdd: function(item) {wfCivi.existingSelect(' . $c . ', ' . $node->nid . ', ' . $callback_path . ', toHide, "' . $hide_method . '", ' . $no_hide_blank . ', item.id, ' . $ajax . ');},
-          onDelete: function(item) {wfCivi.existingSelect(' . $c . ', ' . $node->nid . ', ' . $callback_path . ', toHide, "' . $hide_method . '", ' . $no_hide_blank . ', "", false);},
           prePopulate: prep
         }';
         $js = "var prep = wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);
-                field.tokenInput($callback_path, $settings);";
+                field.tokenInput($callback_path, $settings);
+                $onChange";
       }
       break;
 
@@ -385,10 +387,7 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
       if ($node && isset($node->webform_civicrm)) {
         $filters = wf_crm_search_filters($node, $component);
         $element['#options'] = wf_crm_contact_search($node, $component, $filters);
-        $js = "field.change(function() {
-                  wfCivi.existingSelect($c, {$node->nid}, $callback_path, toHide, '$hide_method', $no_hide_blank, \$(this).val(), $ajax);
-                });
-                wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
+        $js = "$onChange wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
       }
       // Display empty option unless there are no results
       if (!$component['extra']['allow_create'] || count($element['#options']) > 1) {
@@ -401,11 +400,12 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
         $element['#value'] = $value[0];
       }
       if ($node && isset($node->webform_civicrm)) {
+        $js = $onChange;
         if ($component['extra']['show_hidden_contact']) {
-          $element['#attached']['css'][] = drupal_get_path('module', 'webform_civicrm') . '/css/token-input.css';
+          $element['#attached']['css'][] = backdrop_get_path('module', 'webform_civicrm') . '/css/token-input.css';
         }
         if ($hide_fields) {
-          $js = "wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
+          $js .= "wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
         }
         $element['#theme_wrappers'] = array('static_contact_element');
         if ($component['required']) {
@@ -418,10 +418,7 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
       $element['#description'] = t('Lookup by Contact ID.');
       $element['#size'] = 8;
       if ($node && isset($node->webform_civicrm)) {
-        $js = "field.change(function() {
-                  wfCivi.existingSelect($c, {$node->nid}, $callback_path, toHide, '$hide_method', $no_hide_blank, \$(this).val(), $ajax);
-                });
-                wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
+        $js = "$onChange wfCivi.existingInit(field, $c, {$node->nid}, $callback_path, toHide);";
       }
       // Display empty option unless there are no results
       if (!$component['extra']['allow_create'] || count($element['#options']) > 1) {
@@ -440,7 +437,7 @@ function _webform_render_civicrm_contact($component, $value = NULL, $filter = TR
             ' . $js .'
           }
         };
-      })(jQuery, Drupal);';
+      })(jQuery, Backdrop);';
     $element['#attached']['js'][$js] = array('type' => 'inline');
   }
 
@@ -578,19 +575,34 @@ function wf_crm_contact_search($node, $component, $params, $str = NULL) {
   }
   $limit = $str ? 12 : 500;
   $ret = array();
-  $display = $component['extra']['results_display'];
+  $display_fields = array_values($component['extra']['results_display']);
+  $search_field = 'display_name';
+  $sort_field = 'sort_name';
+  // Search and sort based on the selected display field
+  if (!in_array('display_name', $display_fields)) {
+    $search_field = $sort_field = $display_fields[0];
+  }
   $params += array(
     'rowCount' => $limit,
-    'sort' => 'sort_name',
+    'sort' => $sort_field,
+    'return' => $display_fields,
   );
   if ($str) {
-    $params['display_name'] = str_replace(' ', '%', CRM_Utils_Type::escape($str, 'String'));
+    $str = str_replace(' ', '%', CRM_Utils_Type::escape($str, 'String'));
+    // The contact api takes a quirky format for display_name and sort_name
+    if (in_array($search_field, array('sort_name', 'display_name'))) {
+      $params[$search_field] = $str;
+    }
+    // Others use the standard convention
+    else {
+      $params[$search_field] = array('LIKE' => "%$str%");
+    }
   }
   $result = wf_civicrm_api('contact', 'get', $params);
   // Autocomplete results
   if ($str) {
     foreach (wf_crm_aval($result, 'values', array()) as $contact) {
-      if ($name = wf_crm_format_contact($contact, $display)) {
+      if ($name = wf_crm_format_contact($contact, $display_fields)) {
         $ret[] = array('id' => $contact['id'], 'name' => $name);
       }
     }
@@ -605,7 +617,8 @@ function wf_crm_contact_search($node, $component, $params, $str = NULL) {
       $ret['-'] = filter_xss($component['extra']['none_prompt']);
     }
     foreach (wf_crm_aval($result, 'values', array()) as $contact) {
-      if ($name = wf_crm_format_contact($contact, $display)) {
+      // Select lists will be escaped by FAPI
+      if ($name = wf_crm_format_contact($contact, $display_fields, FALSE)) {
         $ret[$contact['id']] = $name;
       }
     }
@@ -619,7 +632,7 @@ function wf_crm_contact_search($node, $component, $params, $str = NULL) {
         l(t('Edit component'), "node/{$node->nid}/webform/components/{$component['cid']}")
       );
       if (wf_crm_admin_access($node) && node_is_page($node)) {
-        drupal_set_message(
+        backdrop_set_message(
           '<strong>' . t('Maximum contacts exceeded, list truncated.') .'</strong><br>' .
           t('The field "@field" cannot show more than !limit contacts because it is a select list. Recommend switching to autocomplete widget in <a !link>component settings</a>.',
             array('!limit' => $limit, '@field' => $component['name'], '!link' => 'href="' . url("node/{$node->nid}/webform/components/{$component['cid']}") . '"')),
@@ -682,16 +695,17 @@ function wf_crm_contact_access($component, $filters, $cid) {
  *
  * @param array $contact
  * @param array $display_fields
+ * @param bool $escape
  * @return bool|string
  */
-function wf_crm_format_contact($contact, $display_fields) {
+function wf_crm_format_contact($contact, $display_fields, $escape = TRUE) {
   if (!$contact) {
     return FALSE;
   }
   $display = array();
   foreach ($display_fields as $field) {
     if ($field && !empty($contact[$field])) {
-      $display[] = check_plain($contact[$field]);
+      $display[] = $escape ? check_plain($contact[$field]) : $contact[$field];
     }
   }
   return implode(' :: ', $display);
@@ -935,14 +949,14 @@ function wf_crm_results_display_options($contact_type) {
 function wf_crm_tokeninput_path() {
   static $ret;
   if (!$ret) {
-    // First see if the library is installed in Drupal
+    // First see if the library is installed in Backdrop
     $path = libraries_get_path('tokeninput');
-    if ($path && is_file(DRUPAL_ROOT . '/' . $path . '/src/jquery.tokeninput.js')) {
+    if ($path && is_file(BACKDROP_ROOT . '/' . $path . '/src/jquery.tokeninput.js')) {
       $ret = $path . '/src/jquery.tokeninput.js';
     }
     // If not, fall back on using the copy shipped with CiviCRM
     else {
-      $ret = drupal_get_path('module', 'civicrm') . '/../packages/jquery/plugins/jquery.tokeninput.js';
+      $ret = backdrop_get_path('module', 'civicrm') . '/../packages/jquery/plugins/jquery.tokeninput.js';
     }
   }
   return $ret;

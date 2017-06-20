@@ -19,10 +19,10 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
    */
   function stateProvince($input) {
     if (!$input || (intval($input) != $input && $input != 'default')) {
-      drupal_json_output(array('' => t('- first choose a country -')));
+      backdrop_json_output(array('' => t('- first choose a country -')));
       exit();
     }
-    drupal_json_output(wf_crm_get_states($input));
+    backdrop_json_output(wf_crm_get_states($input));
     exit();
   }
 
@@ -37,7 +37,7 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
         'field' => 'county_id',
         'state_province_id' => wf_crm_state_abbr($state, 'id', $country)
       );
-      drupal_json_output(wf_crm_apivalues('address', 'getoptions', $params));
+      backdrop_json_output(wf_crm_apivalues('address', 'getoptions', $params));
       exit();
     }
   }
@@ -55,7 +55,7 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
     $this->node = node_load($nid);
     $this->settings = $this->node->webform_civicrm;
     if (!$this->autocompleteAccess($fid)) {
-      drupal_access_denied();
+      backdrop_access_denied();
     }
     $this->data = $this->node->webform_civicrm['data'];
     $component = $this->node->webform['components'][$fid];
@@ -68,7 +68,7 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
     // Autocomplete contact names
     if (!empty($_GET['str'])) {
       if ($str = trim($_GET['str'])) {
-        drupal_json_output(wf_crm_contact_search($this->node, $component, $filters, $str));
+        backdrop_json_output(wf_crm_contact_search($this->node, $component, $filters, $str));
       }
       exit();
     }
@@ -132,12 +132,31 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
               }
             }
           }
+          // Populate related contacts
+          elseif ($c == 1 && $i > $c && $field == 'existing') {
+            $related_component = $this->getComponent($fid);
+            if (wf_crm_aval($related_component['extra'], 'default') == 'relationship') {
+              $old_related_cid = wf_crm_aval($this->ent, "contact:$i:id");
+              // Don't be fooled by old data
+              $related_component['extra']['allow_url_autofill'] = FALSE;
+              unset($this->ent['contact'][$i]);
+              $this->findContact($related_component);
+              $related_cid = wf_crm_aval($this->ent, "contact:$i:id");
+              if ($related_cid && $related_cid != $old_related_cid) {
+                $data[] = array(
+                  'fid' => $fid,
+                  'val' => $related_cid,
+                  'display' => wf_crm_contact_access($related_component,  wf_crm_search_filters($this->node, $related_component), $related_cid),
+                );
+              }
+            }
+          }
         }
         // We want counties, states and countries in that order to avoid race-conditions client-side
         $data = array_merge($data, $states, $countries);
       }
     }
-    drupal_json_output($data);
+    backdrop_json_output($data);
     exit();
   }
 
@@ -163,7 +182,7 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
     if (!empty($this->node->webform['components'][$fid]['private'])) {
       return FALSE;
     }
-    if (variable_get('webform_submission_access_control', 1)) {
+    if (config_get('webform.settings', 'webform_submission_access_control') == 1) {
       $allowed_roles = array();
       foreach ($this->node->webform['roles'] as $rid) {
         $allowed_roles[$rid] = isset($user->roles[$rid]) ? TRUE : FALSE;
@@ -178,7 +197,7 @@ class wf_crm_webform_ajax extends wf_crm_webform_base {
 }
 
 /**
- * Drupal page callback to serve AJAX requests.
+ * Backdrop page callback to serve AJAX requests.
  *
  * @param $key
  *   Type of AJAX request
@@ -195,5 +214,5 @@ function wf_crm_ajax($key, $input = '') {
   elseif (strpos($key, '-')) {
     $processor->contactAjax($key);
   }
-  drupal_access_denied();
+  backdrop_access_denied();
 }
