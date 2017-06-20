@@ -451,6 +451,7 @@ class wf_crm_admin_form {
           'entire_result' => t('Include <em>entire</em> webform submission in activity details'),
           'view_link' => t('Include link to <em>view</em> webform submission in activity details'),
           'edit_link' => t('Include link to <em>edit</em> webform submission in activity details'),
+          'update_existing' => t('Update the details when an existing activity is updated'),
         ),
         '#default_value' => wf_crm_aval($this->data, "activity:$n:details", array('view_link'), TRUE),
       );
@@ -970,7 +971,7 @@ class wf_crm_admin_form {
     $this->checkSubmissionLimit();
     // Add contribution fields
     foreach ($this->sets as $sid => $set) {
-      if ($set['entity_type'] == 'contribution' && (empty($set['sub_types']) || $set['sub_types'][0] == $page['financial_type_id'])) {
+      if ($set['entity_type'] == 'contribution' && (empty($set['sub_types']) || in_array($page['financial_type_id'], $set['sub_types']) )) {
         $this->form['contribution']['sets'][$sid] = array(
           '#type' => 'fieldset',
           '#title' => $set['label'],
@@ -1940,9 +1941,11 @@ class wf_crm_admin_form {
     foreach ($webforms as $webform) {
       $field_name = "cg{$gid}_custom_$fid";
       $field_info = wf_crm_get_field($field_name);
-      $node = node_load($webform->nid);
+      // Reset node cache to avoid stale data, so as not to insert the same component twice
+      $node = node_load($webform->nid, NULL, TRUE);
       $enabled = wf_crm_enabled_fields($node, NULL, TRUE);
       $updated = array();
+      // Handle update & delete of existing components
       foreach ($node->webform['components'] as $component) {
         if (substr($component['form_key'], 0 - strlen($field_name)) === $field_name) {
           if ($pieces = wf_crm_explode_key($component['form_key'])) {
@@ -1964,7 +1967,8 @@ class wf_crm_admin_form {
           }
         }
       }
-      if ($op != 'delete') {
+      // Handle create new components
+      if ($op == 'create') {
         $ent = $sets["cg$gid"]['entity_type'];
         foreach ($node->webform_civicrm['data'][$ent] as $c => $item) {
           if (!empty($item["dynamic_custom_cg$gid"]) && empty($updated[$ent][$c])) {

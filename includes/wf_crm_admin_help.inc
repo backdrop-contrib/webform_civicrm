@@ -52,7 +52,13 @@ class wf_crm_admin_help {
 
   public static function contact_contact_id() {
     print '<p>' .
-      t('This hidden field can be used to as a token to generate links, for example to include an email link back to this form to update their info.') .
+      t('This read-only field can be used to as a token to generate links, for example to include an email link back to this form to update their info.') .
+      '</p>';
+  }
+
+  public static function contact_user_id() {
+    print '<p>' .
+      t("This read-only field will load the contact's backdrop user id. Works even for anonymous users following a checksum.") .
       '</p>';
   }
 
@@ -118,6 +124,27 @@ class wf_crm_admin_help {
       t('This amount will be in addition to any paid events and memberships.') .
       '</p>';
     self::fee();
+  }
+
+  public static function contribution_frequency_unit() {
+    print '<p>' .
+      t('Frequency of Installments. ') .
+      t('Set the frequency for the installments - options are: day, week, month, year - or make this a user-select element on the webform.') .
+      '</p>';
+  }
+
+  public static function contribution_installments() {
+    print '<p>' .
+      t('Number of Installments. ') .
+      t('Create a webform element that allows the Number of Installments to be specified: for example - total amount is paid in 10 installments. For a Contribution of unspecified duration/commitment use installments = 0.') .
+      '</p>';
+  }
+
+  public static function contribution_frequency_interval() {
+    print '<p>' .
+      t('Interval of Installments. ') .
+      t('Create a webform elements that allows the Interval of Installments to be specified: for example - every second (month).') .
+      '</p>';
   }
 
   public static function participant_fee_amount() {
@@ -394,7 +421,7 @@ class wf_crm_admin_help {
 
   public static function dynamic_custom() {
     print '<p>' .
-      t('Something') .
+      t("This will add all fields from this custom group, and automatically update the webform whenever this group's custom fields are added, edited, or deleted in CiviCRM.") .
       '</p>';
   }
 

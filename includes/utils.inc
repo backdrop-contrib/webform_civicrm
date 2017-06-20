@@ -78,6 +78,10 @@ function wf_crm_field_options($field, $context, $data) {
     // Aside from the above special cases, most lists can be fetched from api.getoptions
     else {
       $params = array('field' => $name, 'context' => 'create');
+      // Special case for contribution_recur fields
+      if ($table == 'contribution' && strpos($name, 'frequency_') === 0) {
+        $table = 'contribution_recur';
+      }
       // Custom fields - use main entity
       if (substr($table, 0, 2) == 'cg') {
         $table = $ent;
@@ -619,6 +623,10 @@ function wf_crm_get_fields($var = 'fields') {
       'name' => t('Contact ID'),
       'type' => 'hidden',
     );
+    $fields['contact_user_id'] = array(
+      'name' => t('User ID'),
+      'type' => 'hidden',
+    );
     $fields['contact_external_identifier'] = array(
       'name' => t('External ID'),
       'type' => 'hidden',
@@ -880,6 +888,20 @@ function wf_crm_get_fields($var = 'fields') {
         'set' => 'caseRoles',
         'exposed_empty_option' => '- ' . t('Automatic') . ' -',
       );
+      $fields['case_start_date'] = array(
+        'name' => t('Case # Start Date'),
+        'type' => 'date',
+        'value' => 'now',
+      );
+      $fields['case_end_date'] = array(
+        'name' => t('Case # End Date'),
+        'type' => 'date',
+        'value' => 'now',
+      );
+      $fields['case_details'] = array(
+        'name' => t('Case # Details'),
+        'type' => 'textarea',
+      );
       // Fetch case roles
       $sets['caseRoles'] = array('entity_type' => 'case', 'label' => t('Case Roles'));
       // Use the vanilla civicrm_api for this because it will throw an error in CiviCRM 4.4 (api doesn't exist)
@@ -1006,7 +1028,36 @@ function wf_crm_get_fields($var = 'fields') {
         'name' => t('Contribution Source'),
         'type' => 'textfield',
       );
-    }
+      $sets['contributionRecur'] = array('entity_type' => 'contribution', 'label' => t('Recurring Contribution'));
+      $fields['contribution_frequency_unit'] = array(
+        'name' => t('Frequency of Installments'),
+        'type' => 'select',
+        'expose_list' => TRUE,
+        'value' => 0,
+        'exposed_empty_option' => '- ' . t('No Installments') . ' -',
+        'set' => 'contributionRecur',
+      );
+      $fields['contribution_installments'] = array(
+        'name' => t('Number of Installments'),
+        'type' => 'number',
+        'value' => '1',
+        'extra' => array(
+          'integer' => 1,
+          'min' => 0,
+        ),
+        'set' => 'contributionRecur',
+      );
+      $fields['contribution_frequency_interval'] = array(
+        'name' => t('Interval of Installments'),
+        'type' => 'number',
+        'value' => '1',
+        'extra' => array(
+          'integer' => 1,
+          'min' => 1,
+        ),
+        'set' => 'contributionRecur',
+      );
+     }
     if (isset($sets['participant'])) {
       $fields['participant_event_id'] = array(
         'name' => t('Event(s)'),
@@ -1343,7 +1394,7 @@ function wf_crm_get_field($key) {
  *   (optional) uf or contact ID - defaults to current user
  * @param $type
  *   (optional) what type of ID is supplied - defaults to user id
- * @return null
+ * @return int|null
  */
 function wf_crm_user_cid($id = NULL, $type = 'uf') {
   static $current_user = NULL;

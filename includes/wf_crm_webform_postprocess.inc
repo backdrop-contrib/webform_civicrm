@@ -707,6 +707,11 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     if (!empty($this->enabled[$fid . 'contact_id'])) {
       $this->submissionValue($this->enabled[$fid . 'contact_id'], $cid);
     }
+    if (!empty($this->enabled[$fid . 'user_id'])) {
+      $user_id = wf_crm_user_cid($cid, 'contact');
+      $user_id = $user_id ? $user_id : '';
+      $this->submissionValue($this->enabled[$fid . 'user_id'], $user_id);
+    }
     if (!empty($this->enabled[$fid . 'existing'])) {
       $this->submissionValue($this->enabled[$fid . 'existing'], $cid);
     }
@@ -960,6 +965,10 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
         if ($perm == 1 || $perm == 2) {
           $perm = $perm == 1 ? 2 : 1;
         }
+      }
+      //initialise start_date for create action.
+      if (empty($existing) && !array_key_exists('start_date', $params)) {
+        $params['start_date'] = NULL;
       }
       $params += $existing;
       $params['contact_id_a'] = $cid1;
@@ -1282,6 +1291,10 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
         $params = $data['activity'][1];
         // Create mode
         if (empty($this->ent['activity'][$n]['id'])) {
+          // Skip if no activity type
+          if (empty($params['activity_type_id'])) {
+            continue;
+          }
           // Automatic status based on whether activity_date_time is in the future
           if (empty($params['status_id'])) {
             $params['status_id'] = strtotime(wf_crm_aval($params, 'activity_date_time', 'now')) > time() ? 'Scheduled' : 'Completed';
@@ -1296,23 +1309,17 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
             }
           }
           // Format details as html
-          $params['details'] = nl2br(wf_crm_aval($params, 'details', ''));
-          // Add webform results to details
-          if (!empty($this->data['activity'][$n]['details']['entire_result'])) {
-            module_load_include('inc', 'webform', 'includes/webform.submissions');
-            $submission = webform_submission_render($this->node, $this->submission, NULL, 'html');
-            $params['details'] .= backdrop_render($submission);
-          }
-          if (!empty($this->data['activity'][$n]['details']['view_link'])) {
-            $params['details'] .= '<p>' . l(t('View Webform Submission'), "node/{$this->node->nid}/submission/{$this->submission->sid}", array('absolute' => TRUE, 'alias' => TRUE)) . '</p>';
-          }
-          if (!empty($this->data['activity'][$n]['details']['edit_link'])) {
-            $params['details'] .= '<p>' . l(t('Edit Submission'), "node/{$this->node->nid}/submission/{$this->submission->sid}/edit", array('absolute' => TRUE, 'alias' => TRUE)) . '</p>';
-          }
+          $this->formatSubmissionDetails($params, $n);
         }
         // Update mode
         else {
           $params['id'] = $this->ent['activity'][$n]['id'];
+
+          // Update details when user has selected he wants to update the details
+          if (!empty($this->data['activity'][$n]['details']['update_existing'])) {
+            // Format details as html
+            $this->formatSubmissionDetails($params, $n);
+          }
         }
         // Allow "automatic" values to pass-thru if empty
         foreach ($params as $field => $value) {
@@ -1379,6 +1386,32 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
           }
         }
       }
+    }
+  }
+
+ /**
+  * Process the submission into the details of the activity.
+  */
+ private function formatSubmissionDetails(&$params, $activity_number) {
+    // Format details as html
+    $params['details'] = nl2br(wf_crm_aval($params, 'details', ''));
+    // Add webform results to details
+    if (!empty($this->data['activity'][$activity_number]['details']['entire_result'])) {
+      module_load_include('inc', 'webform', 'includes/webform.submissions');
+      $submission = webform_submission_render($this->node, $this->submission, NULL, 'html');
+      $params['details'] .= backdrop_render($submission);
+    }
+    if (!empty($this->data['activity'][$activity_number]['details']['view_link'])) {
+      $params['details'] .= '<p>' . l(t('View Webform Submission'), "node/{$this->node->nid}/submission/{$this->submission->sid}", array(
+          'absolute' => TRUE,
+          'alias' => TRUE
+        )) . '</p>';
+    }
+    if (!empty($this->data['activity'][$activity_number]['details']['edit_link'])) {
+      $params['details'] .= '<p>' . l(t('Edit Submission'), "node/{$this->node->nid}/submission/{$this->submission->sid}/edit", array(
+          'absolute' => TRUE,
+          'alias' => TRUE
+        )) . '</p>';
     }
   }
 
@@ -1486,6 +1519,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
         $this->totalContribution += $item['line_total'] = $item['unit_price'] * (int) $item['qty'];
       }
     }
+    $this->totalContribution = round($this->totalContribution, 2);
     return $this->totalContribution;
   }
 
@@ -1539,6 +1573,11 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     );
     if (!empty($_POST['stripe_token'])) {
       // Using Stripe payment processor - cc fields not posted
+      $billing_fields['credit_card_number'] = FALSE;
+      $billing_fields['cvv2'] = FALSE;
+    }
+    if (!empty($_POST['stripe_source'])) {
+      // Using Stripe payment processor - cc fields not posted using sources
       $billing_fields['credit_card_number'] = FALSE;
       $billing_fields['cvv2'] = FALSE;
     }
@@ -1669,7 +1708,18 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
    * This happens during form validation and sets a form error if unsuccessful
    */
   private function submitLivePayment() {
-    $result = wf_civicrm_api('contribution', 'transact', $this->contributionParams());
+    $contributionParams = $this->contributionParams();
+
+    // Only if #installments = 1, do we process a single transaction/contribution. #installments = 0 in CiviCRM Core means open ended commitment;
+    $numInstallments = wf_crm_aval($contributionParams, 'installments', 1, TRUE);
+    $frequencyInterval = wf_crm_aval($contributionParams, 'frequency_unit');
+    if ($numInstallments != 1 && !empty($frequencyInterval)) {
+      $result = $this->contributionRecur($contributionParams);
+    }
+    else {
+      $result = wf_civicrm_api('contribution', 'transact', $contributionParams);
+    }
+
     if (empty($result['id'])) {
       if (!empty($result['error_message'])) {
         form_set_error('contribution', $result['error_message']);
@@ -1680,6 +1730,57 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
       return;
     }
     $this->ent['contribution'][1]['id'] = $result['id'];
+  }
+
+  /**
+   * Generate recurring contribution and transact the first one
+   */
+  private function contributionRecur($contributionParams) {
+    $installments = $contributionParams['installments'];
+    if ($installments != 0) {
+      // DRU-2862396 - we must ensure to only present 2 decimals to CiviCRM:
+      $contributionRecurAmount = floor(($contributionParams['total_amount'] / $installments) * 100) / 100;
+      $contributionFirstAmount = $contributionParams['total_amount'] - $contributionRecurAmount * ($installments - 1);
+    }
+
+    // Create Params for Creating the Recurring Contribution Series and Create it
+    $contributionRecurParams = array(
+      'sequential' => 1,
+      'contact_id' => $contributionParams['contact_id'],
+      'frequency_interval' => wf_crm_aval($contributionParams, 'frequency_interval', 1),
+      'frequency_unit' => wf_crm_aval($contributionParams, 'frequency_unit', 'month'),
+      'installments' => $installments,
+      'amount' => $contributionRecurAmount,
+      'contribution_status_id' => 5,
+      'currency' => $contributionParams['currency'],
+      'payment_processor_id' =>  $contributionParams['payment_processor_id'],
+      'financial_type_id' =>  $contributionParams['financial_type_id'],
+    );
+    $resultRecur = wf_civicrm_api('ContributionRecur', 'create', $contributionRecurParams);
+
+    // Run the Transaction - and Create the Contribution Record - relay Recurring Series information in addition to the already existing Params [and re-key where needed]; at times two keys are required
+    $contributionParams['total_amount'] = $contributionFirstAmount;
+    $additionalParams = array(
+      'contribution_recur_id' => $resultRecur['id'],
+      'contributionRecurID' => $resultRecur['id'],
+      'is_recur' => 1,
+      'contactID' => $contributionParams['contact_id'],
+      'frequency_interval' => wf_crm_aval($contributionParams, 'frequency_interval', 1),
+      'frequency_unit' => wf_crm_aval($contributionParams, 'frequency_unit', 'month'),
+    );
+    $result = wf_civicrm_api('contribution', 'transact', $contributionParams + $additionalParams);
+
+    // If transaction was successful - Update the Recurring Series - currency must be resubmitted or else it will re-default to USD; invoice_id is that of the initiating Contribution
+    if (empty($result['error_message'])) {
+      $resultUpdateRecur = wf_civicrm_api('ContributionRecur', 'create', array(
+        'id' => $resultRecur['id'],
+        'currency' => $contributionParams['currency'],
+        'next_sched_contribution_date' => date("Y-m-d H:i:s", strtotime('+' . $contributionRecurParams['frequency_interval'] . ' ' . $contributionRecurParams['frequency_unit'])),
+        'invoice_id' => $result['values'][$result['id']]['invoice_id'],
+        'payment_instrument_id' => $result['values'][$result['id']]['payment_instrument_id'],
+      ));
+    }
+    return $result;
   }
 
   /**
@@ -1713,7 +1814,12 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
       $paymentProcessor = CRM_Core_Payment::singleton($mode, $processor_type);
     }
     else {
-      $paymentProcessor = \Civi\Payment\System::singleton()->getByName($processor_type, $params['is_test']);
+      $paymentProcessor = \Civi\Payment\System::singleton()->getById($params['payment_processor_id']);
+      // Ideally we would pass the correct id for the test processor through but that seems not to be the
+      // case so load it here.
+      if (!empty($params['is_test'])) {
+        $paymentProcessor = \Civi\Payment\System::singleton()->getByName($processor_type['name'], TRUE);
+      }
     }
     // Add contact details to params (most processors want a first_name and last_name)
     $contact = wf_civicrm_api('contact', 'getsingle', array('id' => $this->ent['contact'][1]['id']));
@@ -1791,7 +1897,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     // TODO: needs review if this is changed in 4.6
     if (!is_null($this->tax_rate)) {
       $params['non_deductible_amount']  = $this->totalContribution;
-      $params['tax_amount'] = ($params['total_amount'] / ($this->tax_rate + 100)) * $this->tax_rate;
+      $params['tax_amount'] = round(($params['total_amount'] / ($this->tax_rate + 100)) * $this->tax_rate, 2);
     }
     $params['description'] = t('Webform Payment: @title', array('@title' => $this->node->title));
     if (!isset($params['source'])) {
@@ -2235,7 +2341,9 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
         $reorderedArray[$index]['location_type_id'] = $existingLocationTypeId;
       }
 
-      $reorderedArray[$index][$entity] = $eValue[$entity];
+      if (!empty($eValue[$entity])) {
+        $reorderedArray[$index][$entity] = $eValue[$entity];
+      }
 
       // address field contain many sub fields and should be handled differently
       if ($entity != 'address')  {

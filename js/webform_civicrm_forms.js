@@ -16,7 +16,7 @@ var wfCivi = (function ($, D) {
       // Fill name fields with name typed
       if (cid.length > 1) {
         var names = {first: '', last: ''};
-        var s = cid.substr(1).split(' ');
+        var s = cid.substr(1).replace(/%/g, ' ').split(' ');
         for (var i in s) {
           var str = s[i].substr(0,1).toUpperCase() + s[i].substr(1).toLowerCase();
           if (i < 1) {
@@ -197,6 +197,12 @@ var wfCivi = (function ($, D) {
           $el.attr('data-val', val);
         }
         else if ($el.val() !== val) {
+          if ($el.data('tokenInputObject')) {
+            $el.tokenInput('clear').tokenInput('add', {id: val, name: this.display});
+          }
+          else if ($el.is('[type=hidden]')) {
+            $el.siblings('.token-input-list').find('p').text(this.display);
+          }
           $el.val(val).trigger('change', 'webform_civicrm:autofill');
         }
       }
@@ -276,12 +282,7 @@ var wfCivi = (function ($, D) {
     if (!$.isEmptyObject(data || [])) {
       if (!data['']) {
         var text = $el.hasClass('required') ? Backdrop.t('- Select -') : Backdrop.t('- None -');
-        if ($el.hasClass('has-default')) {
-          $el.removeClass('has-default');
-        }
-        else {
-          $el.append('<option value="">'+text+'</option>');
-        }
+        $el.append('<option value="">'+text+'</option>');
       }
       $.each(data, function(key, val) {
         $el.append('<option value="'+key+'">'+val+'</option>');
@@ -289,7 +290,6 @@ var wfCivi = (function ($, D) {
       $el.val(value);
     }
     else {
-      $el.removeClass('has-default');
       $el.append('<option value="-">'+Backdrop.t('- N/A -')+'</option>');
     }
     $el.removeAttr('disabled').trigger('change', 'webform_civicrm:chainselect');
@@ -334,9 +334,6 @@ var wfCivi = (function ($, D) {
       classes = $el.attr('class').replace('text', 'select'),
       id = $el.attr('id'),
       $form = $el.closest('form');
-    if (value !== '') {
-      classes = classes + ' has-default';
-    }
     $el.replaceWith('<select id="'+$el.attr('id')+'" name="'+$el.attr('name')+'"' + ' class="' + classes + ' civicrm-processed" data-val="' + value + '"></select>');
     return $('#' + id, $form).change(function() {
       $(this).attr('data-val', '');
@@ -375,6 +372,12 @@ var wfCivi = (function ($, D) {
 
           populateStates($el, countryVal);
         }
+      });
+
+      // Support CiviCRM's quirky way of doing optgroups
+      $('option[value^=crm_optgroup]', context).each(function () {
+        $(this).nextUntil('option[value^=crm_optgroup]').wrapAll('<optgroup label="' + $(this).text() + '" />');
+        $(this).remove();
       });
 
       // Add handler to country field to trigger ajax refresh of corresponding state/prov

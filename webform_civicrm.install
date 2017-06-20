@@ -16,7 +16,6 @@ function webform_civicrm_requirements($phase) {
     $status = _webform_civicrm_status();
 
     if (!$status['webform_civicrm']) {
-
       $requirements['webform_civicrm'] = array(
         'title' => 'Webform CiviCRM Integration',
         'value' => $t('Version error'),
@@ -84,6 +83,13 @@ function webform_civicrm_schema() {
       ),
       'block_unknown_users' => array(
         'description' => 'Only allow known contacts to use form.',
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'create_new_relationship' => array(
+        'description' => 'Create new relationship if duplicate record exists and is expired or inactive.',
         'type' => 'int',
         'size' => 'tiny',
         'not null' => TRUE,
@@ -167,4 +173,22 @@ function webform_civicrm_update_1000() {
  */
 function webform_civicrm_update_1001() {
   config_set('webform.settings', 'webform_table', TRUE);
+}
+
+/**
+ * Add field to create new relationship for duplicate records(expired/inactive).
+ */
+function webform_civicrm_update_1002() {
+  $field =  array(
+    'description' => 'Create new relationship if duplicate record exists and is expired or inactive.',
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => TRUE,
+    'default' => 0,
+  );
+  if (db_table_exists('webform_civicrm_forms')) {
+    if (!db_field_exists('webform_civicrm_forms', 'create_new_relationship')) {
+      db_add_field('webform_civicrm_forms', 'create_new_relationship', $field);
+    }
+  }
 }
