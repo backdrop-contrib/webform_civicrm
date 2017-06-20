@@ -1,6 +1,7 @@
 name = Webform CiviCRM Integration
 description = A powerful, flexible, user-friendly form builder for CiviCRM.
 backdrop = 1.x
+version = 1.x-1.0.1
 type = module
 package = CiviCRM
 dependencies[] = civicrm (>=4.4)
