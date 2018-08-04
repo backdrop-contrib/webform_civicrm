@@ -32,6 +32,10 @@ abstract class wf_crm_webform_base {
   // tax integration
   private $_tax_rate;
 
+  const
+    MULTIVALUE_FIELDSET_MODE_CREATE_OR_EDIT = 0,
+    MULTIVALUE_FIELDSET_MODE_CREATE_ONLY = 1;
+
   /**
    * Magic method to retrieve otherwise inaccessible properties
    * @param $name
@@ -60,7 +64,7 @@ abstract class wf_crm_webform_base {
           if ($this->contribution_page) {
             // tax integration
             $taxRates = CRM_Core_PseudoConstant::getTaxRates();
-            $this->_tax_rate = $taxRates[$this->_contribution_page['financial_type_id']];
+            $this->_tax_rate = isset($taxRates[$this->_contribution_page['financial_type_id']]) ? $taxRates[$this->_contribution_page['financial_type_id']] : NULL;
           }
           return $this->_tax_rate;
         }
@@ -107,7 +111,7 @@ abstract class wf_crm_webform_base {
         }
         $result = wf_civicrm_api($ent, 'get', $params);
         // Handle location field sorting
-        if (in_array($ent, wf_crm_location_fields()) && $ent != 'website') {
+        if (in_array($ent, wf_crm_location_fields())) {
           $result['values'] = $this->reorderByLocationType($c, $ent, $result['values']);
         }
         if (!empty($result['values'])) {
@@ -148,7 +152,7 @@ abstract class wf_crm_webform_base {
                 $address['state_province_id'] = wf_crm_state_abbr($address['state_province_id']);
               }
               // Load custom data
-              if(isset($address['id'])){
+              if (isset($address['id'])){
                 $custom = $this->getCustomData($address['id'], 'address');
                 if (!empty($custom['address'])) {
                   $address += $custom['address'][1];
@@ -312,10 +316,14 @@ abstract class wf_crm_webform_base {
   protected function reorderByLocationType($c, $ent, $values = array()){
     $reorderedArray = array();
 
-    if(isset($this->settings['data']['contact'][$c][$ent])){
+    if (isset($this->settings['data']['contact'][$c][$ent])){
       // First pass
-      $reorderedArray = $this->matchLocationTypes($c, $ent, $values);
-
+      if ($ent == 'website') {
+        $reorderedArray = $this->matchWebsiteTypes($c, $ent, $values);
+      }
+      else {
+        $reorderedArray = $this->matchLocationTypes($c, $ent, $values);
+      }
       // Second pass
       $reorderedArray = $this->handleRemainingValues($reorderedArray, $values);
 
@@ -343,25 +351,71 @@ abstract class wf_crm_webform_base {
     foreach ($settingsArray[$ent] as $setting) {
       $valueFound = false;
       foreach($values as $key => $value){
-        if((in_array($ent, array('address', 'email')) && $value['location_type_id'] == $setting['location_type_id'])
+        if ((in_array($ent, array('address', 'email')) && $value['location_type_id'] == $setting['location_type_id'])
            ||
           ($value['location_type_id'] == $setting['location_type_id'] && $value[$ent.'_type_id'] == $setting[$ent.'_type_id'])
-          ){
+          ) {
             $reorderedArray[$key] = $value;
             $valueFound = true;
             unset($values[$key]);
             break;
-        } else if(empty($setting['location_type_id'])) { // for 'user-select' fields
-            $valueFound = true;
-            $reorderedArray['us'.$userSelectIndex] = 'user-select';
-            $userSelectIndex ++;
-            break;
+        }
+        // For 'user-select' fields
+        else if (empty($setting['location_type_id'])) {
+          $valueFound = true;
+          $reorderedArray['us'.$userSelectIndex] = 'user-select';
+          $userSelectIndex ++;
+          break;
         }
       }
 
       // always keep number of returned values equal to chosen settings
       // if value is not found then set an empty array
-      if(!$valueFound){
+      if (!$valueFound){
+        $reorderedArray[] = array();
+      }
+    }
+    return $reorderedArray;
+  }
+
+  /**
+   * Organize values according to website types
+   *
+   * @param integer $c
+   * @param string $ent
+   * @param array $values
+   * @return array $reorderedArray
+   */
+  protected function matchWebsiteTypes($c, $ent, &$values) {
+    // create temporary settings array to include 'user-select' fields
+    // on the right place in array
+    $settingsArray = $this->add_user_select_field_placeholder($ent, $this->settings['data']['contact'][$c]);
+    $userSelectIndex = 0;
+    // Go through the array and match up locations by type
+    // Put placeholder 'user-select' where location_type_id is empty for second pass
+    foreach ($settingsArray[$ent] as $setting) {
+      $valueFound = FALSE;
+      foreach ($values as $key => $value) {
+        if (($value[$ent . '_type_id'] == $setting[$ent . '_type_id'])
+        ) {
+          $reorderedArray[$key] = $value;
+          $valueFound = TRUE;
+          unset($values[$key]);
+          break;
+        }
+        else {
+          if (empty($setting['website_type_id'])) { // for 'user-select' fields
+            $valueFound = TRUE;
+            $reorderedArray['us' . $userSelectIndex] = 'user-select';
+            $userSelectIndex++;
+            break;
+          }
+        }
+      }
+
+      // always keep number of returned values equal to chosen settings
+      // if value is not found then set an empty array
+      if (!$valueFound){
         $reorderedArray[] = array();
       }
     }
@@ -378,7 +432,7 @@ abstract class wf_crm_webform_base {
   protected function handleRemainingValues($reorderedArray, &$values){
     // Put leftover values in fields marked as 'user-select'
     foreach($reorderedArray as $key => $value){
-      if($reorderedArray[$key] == 'user-select'){
+      if ($reorderedArray[$key] == 'user-select'){
         $reorderedArray[$key] = !empty($values) ? array_shift($values) : '';
       }
     }
@@ -393,9 +447,9 @@ abstract class wf_crm_webform_base {
    * @return array $settings
    */
   protected function add_user_select_field_placeholder($ent, $settings = array()){
-    if($settings['number_of_'.$ent] > count($settings[$ent])){
+    if ($settings['number_of_'.$ent] > count($settings[$ent])){
       for($i = 1; $i <= $settings['number_of_'.$ent]; $i++){
-        if(!array_key_exists($i, $settings[$ent])){
+        if (!array_key_exists($i, $settings[$ent])){
           $settings[$ent][$i]['location_type_id'] = NULL;
         }
       }
@@ -419,7 +473,7 @@ abstract class wf_crm_webform_base {
     $found = array();
     $active_clause = '';
     if (!empty($this->settings['create_new_relationship'])) {
-      $active_clause = 'AND is_active = 1 AND end_date >= now()';
+      $active_clause = 'AND is_active = 1 AND (end_date IS NULL OR end_date >= now())';
     }
     if ($r_types && $cid1 && $cid2) {
       $types = array();
@@ -641,10 +695,14 @@ abstract class wf_crm_webform_base {
    * @param $known
    *   Is this a known record (as opposed to a contact matched via dedupe rules)?
    *   We only allow saving blank fields for known contacts.
+   * @param $contact_index
+   *   Contact's index
    */
-  protected function saveCustomData($entity, $entity_id, $entity_type, $known = TRUE) {
+  protected function saveCustomData($entity, $entity_id, $entity_type, $known = TRUE, $contact_index = 1) {
     $existing = FALSE;
     $params = array('entityID' => $entity_id);
+    $createMultiValues = array();
+
     foreach ($entity as $table => $values) {
       if (substr($table, 0, 2) == 'cg' && is_array($values)) {
         if ($existing === FALSE) {
@@ -652,7 +710,8 @@ abstract class wf_crm_webform_base {
         }
         $existing += array($table => array());
         $insert = 0;
-        foreach ($values as $custom) {
+
+        foreach ($values as $valuesIndex => $custom) {
           // Match to id of existing record (id will be 0 for non-multi-value custom sets, which is fine)
           if ($id = each($existing[$table])) {
             $suf = $id['key'];
@@ -661,28 +720,85 @@ abstract class wf_crm_webform_base {
           else {
             $suf = --$insert;
           }
+
+          $multivaluesCreateMode = NULL;
+
+          // Handle 'Create mode' for multivalues custom fields of Contact entity.
+          if ($entity_type === 'Contact') {
+            $createModeKey = 'civicrm_' . $contact_index . '_contact_' . $valuesIndex . '_' . $table . '_createmode';
+            $multivaluesCreateMode = isset($this->data['config']['create_mode'][$createModeKey]) ? (int) $this->data['config']['create_mode'][$createModeKey] : NULL;
+          }
+          $multiValueSuffix = '_' . $suf;
+
+          if ($multivaluesCreateMode === self::MULTIVALUE_FIELDSET_MODE_CREATE_ONLY) {
+            // Using 'Create only' mode we don't need custom value's suffix
+            // so the value can be added as new instead of updated.
+            $multiValueSuffix = '';
+          }
+
+          $customGroupParams = array();
+
           foreach ($custom as $k => $v) {
             // Only save if this is not blank or data already exists and record is known
             if ($v !== '' || ($suf >= 0 && $known)) {
-              $params[$k . '_' . $suf] = $v;
+              $customGroupParams[$k . $multiValueSuffix] = $v;
             }
+          }
+
+          if ($multivaluesCreateMode === self::MULTIVALUE_FIELDSET_MODE_CREATE_ONLY) {
+            $createMultiValues[] = $customGroupParams;
+          }
+          else {
+            $params = array_merge($params, $customGroupParams);
           }
         }
       }
     }
+
     if (count($params) > 1) {
-      $result = CRM_Core_BAO_CustomValueTable::setValues($params);
-      // Prevent wholesale failure by saving each param individually if there was an error while trying to save them all at once
-      if (!empty($result['is_error'])) {
-        $bt = debug_backtrace();
-        array_shift($params);
-        foreach ($params as $k => $v) {
-          $single_param = array('entityID' => $entity_id, $k => $v);
-          $result = CRM_Core_BAO_CustomValueTable::setValues($single_param);
-          if (!empty($result['is_error'])) {
-            $file = explode('/', $bt[0]['file']);
-            watchdog('webform_civicrm', 'The CiviCRM "CustomValueTable::setValues" function returned the error: "%msg" when called by line !line of !file with the following parameters: "!params"', array('%msg' => $result['error_message'], '!line' => $bt[0]['line'], '!file' => array_pop($file), '!params' => print_r($single_param, TRUE)), WATCHDOG_ERROR);
-          }
+      // Update existing values.
+      $this->saveCustomValues($entity_id, $params);
+    }
+
+    if (!empty($createMultiValues)) {
+      // Add new values.
+      foreach ($createMultiValues as $multiValuesSet) {
+        $this->saveCustomValues($entity_id, array_merge($multiValuesSet, array('entityID' => $entity_id)), TRUE);
+      }
+    }
+  }
+
+  /**
+   * Saves a set of custom values for specific entity Id.
+   *
+   * @param int $entity_id
+   * @param array $params
+   * @param bool $skipEmpty
+   */
+  protected function saveCustomValues($entity_id, array $params, $skipEmpty = FALSE) {
+    if ($skipEmpty) {
+      // Remove empty values from $params array. Useful to not save empty values
+      // with 'Create only' mode.
+      foreach ($params as $key => $value) {
+        $checkValue = str_replace(CRM_Core_DAO::VALUE_SEPARATOR, '', $value);
+        if (empty($checkValue)) {
+          unset($params[$key]);
+        }
+      }
+    }
+
+    $result = CRM_Core_BAO_CustomValueTable::setValues($params);
+
+    // Prevent wholesale failure by saving each param individually if there was an error while trying to save them all at once
+    if (!empty($result['is_error'])) {
+      $bt = debug_backtrace();
+      array_shift($params);
+      foreach ($params as $k => $v) {
+        $single_param = array('entityID' => $entity_id, $k => $v);
+        $result = CRM_Core_BAO_CustomValueTable::setValues($single_param);
+        if (!empty($result['is_error'])) {
+          $file = explode('/', $bt[0]['file']);
+          watchdog('webform_civicrm', 'The CiviCRM "CustomValueTable::setValues" function returned the error: "%msg" when called by line !line of !file with the following parameters: "!params"', array('%msg' => $result['error_message'], '!line' => $bt[0]['line'], '!file' => array_pop($file), '!params' => print_r($single_param, TRUE)), WATCHDOG_ERROR);
         }
       }
     }

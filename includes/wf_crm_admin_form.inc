@@ -21,6 +21,7 @@ class wf_crm_admin_form {
   function __construct($form, &$form_state, $node) {
     module_load_include('inc', 'webform_civicrm', 'includes/utils');
     module_load_include('inc', 'webform_civicrm', 'includes/wf_crm_admin_help');
+    module_load_include('inc', 'webform_civicrm', 'includes/wf_crm_webform_base');
     civicrm_initialize();
     $this->form = $form;
     $this->form_state = &$form_state;
@@ -124,11 +125,20 @@ class wf_crm_admin_form {
     $this->rebuildData();
     // Hack for nicer UX: pre-check phone, email, etc when user increments them
     if (!empty($_POST['_triggering_element_name'])) {
-      foreach (array('phone' => 'phone', 'email' => 'email', 'website' => 'url', 'im' => 'name') as $ent => $field) {
+      $defaults = array(
+        'phone' => 'phone',
+        'email' => 'email',
+        'website' => 'url',
+        'im' => 'name',
+        'address' => array('street_address', 'city', 'state_province_id', 'postal_code'),
+      );
+      foreach ($defaults as $ent => $fields) {
         if (strpos($_POST['_triggering_element_name'], "_number_of_$ent")) {
           list(, $c) = explode('_', $_POST['_triggering_element_name']);
           for ($n = 1; $n <= $this->data['contact'][$c]["number_of_$ent"]; ++$n) {
-            $this->settings["civicrm_{$c}_contact_{$n}_{$ent}_{$field}"] = 1;
+            foreach ((array) $fields as $field) {
+              $this->settings["civicrm_{$c}_contact_{$n}_{$ent}_{$field}"] = 1;
+            }
           }
         }
       }
@@ -320,15 +330,40 @@ class wf_crm_admin_form {
         else {
           $this->addDynamicCustomSetting($fieldset, $sid, 'contact', $n);
         }
-        foreach ($set['fields'] as $fid => $field) {
-          if ($fid == 'contact_contact_sub_type' ||
-            ($fid == 'address_master_id' && count($this->data['contact']) == 1) ||
-            (isset($field['contact_type']) && $field['contact_type'] != $c['contact'][1]['contact_type'])) {
-            continue;
+        if (isset($set['fields'])) {
+          foreach ($set['fields'] as $fid => $field) {
+            if ($fid == 'contact_contact_sub_type' ||
+              ($fid == 'address_master_id' && count($this->data['contact']) == 1) ||
+              (isset($field['contact_type']) && $field['contact_type'] != $c['contact'][1]['contact_type'])) {
+              continue;
+            }
+            $fid = 'civicrm_' . $n . '_contact_' . $i . '_' . $fid;
+            $fieldset[$fid] = $this->addItem($fid, $field);
           }
-          $fid = 'civicrm_' . $n . '_contact_' . $i . '_' . $fid;
-          $fieldset[$fid] = $this->addItem($fid, $field);
         }
+
+        // Add 'Create mode' select field to multiple custom group fieldset.
+        if (substr($sid, 0, 2) == 'cg' && wf_crm_aval($set, 'max_instances') > 1) {
+          $createModeKey = 'civicrm_' . $n . '_contact_' . $i . '_' . $sid . '_createmode';
+
+          $createModeValue = isset($this->settings['data']['config']['create_mode'][$createModeKey]) ? $this->settings['data']['config']['create_mode'][$createModeKey] : NULL;
+
+          $multivalueFieldsetCreateMode = array(
+            '#type' => 'select',
+            '#default_value' => $createModeValue,
+            '#prefix' => '<div class="multivalue-fieldset-create-mode">',
+            '#suffix' => '</div>',
+            '#options' => array(
+              wf_crm_webform_base::MULTIVALUE_FIELDSET_MODE_CREATE_OR_EDIT => t('Create/ Edit'),
+              wf_crm_webform_base::MULTIVALUE_FIELDSET_MODE_CREATE_ONLY => t('Create Only')
+            ),
+            '#title' => t('Create mode'),
+            '#weight' => -1,
+          );
+          $this->help($multivalueFieldsetCreateMode, 'multivalue_fieldset_create_mode', t('Multivalue fieldset create mode'));
+          $fieldset[$createModeKey] = $multivalueFieldsetCreateMode;
+        }
+
         if (isset($set['max_instances'])) {
           $pos[$n . $sid . '_wrapper'][$n . $sid . $i . '_fieldset'] = $fieldset;
         }
@@ -548,9 +583,11 @@ class wf_crm_admin_form {
             'js_select' => $this->addToggle($fs1),
           );
           $this->addDynamicCustomSetting($wrap['custom'][$fs1], $sid, 'activity', $n);
-          foreach ($set['fields'] as $fid => $field) {
-            $fid = "civicrm_{$n}_activity_1_$fid";
-            $wrap['custom'][$fs1][$fid] = $this->addItem($fid, $field);
+          if (isset($set['fields'])) {
+            foreach ($set['fields'] as $fid => $field) {
+              $fid = "civicrm_{$n}_activity_1_$fid";
+              $wrap['custom'][$fs1][$fid] = $this->addItem($fid, $field);
+            }
           }
         }
       }
@@ -632,10 +669,12 @@ class wf_crm_admin_form {
           'js_select' => $this->addToggle($fs1),
         );
         $this->addDynamicCustomSetting($pos[$fs1], $sid, 'case', $n);
-        foreach ($set['fields'] as $fid => $field) {
-          $fid = "civicrm_{$n}_case_1_$fid";
-          if (!$case_type || empty($field['case_types']) || in_array($case_type, $field['case_types'])) {
-            $pos[$fs1][$fid] = $this->addItem($fid, $field);
+        if (isset($set['fields'])) {
+          foreach ($set['fields'] as $fid => $field) {
+            $fid = "civicrm_{$n}_case_1_$fid";
+            if (!$case_type || empty($field['case_types']) || in_array($case_type, $field['case_types'])) {
+              $pos[$fs1][$fid] = $this->addItem($fid, $field);
+            }
           }
         }
       }
@@ -798,7 +837,7 @@ class wf_crm_admin_form {
     );
     $this->help($field, 'reg_options_show_remaining');
     foreach (array(5, 10, 20, 50, 100, 200, 500, 1000) as $num) {
-      $field['#options'][$num]['wrap'] = t('When under !num spaces left', array('!num' => $num));
+      $field['#options'][$num] = t('When under !num spaces left', array('!num' => $num));
     }
     $this->form['participant']['reg_options']['show_remaining'] = $field;
     $this->form['participant']['reg_options']['validate'] = array(
@@ -979,9 +1018,11 @@ class wf_crm_admin_form {
           'js_select' => $this->addToggle($sid),
         );
         $this->addDynamicCustomSetting($this->form['contribution']['sets'][$sid], $sid, 'contribution', 1);
-        foreach ($set['fields'] as $fid => $field) {
-          $fid = "civicrm_1_contribution_1_$fid";
-          $this->form['contribution']['sets'][$sid][$fid] = $this->addItem($fid, $field);
+        if (isset($set['fields'])) {
+          foreach ($set['fields'] as $fid => $field) {
+            $fid = "civicrm_1_contribution_1_$fid";
+            $this->form['contribution']['sets'][$sid][$fid] = $this->addItem($fid, $field);
+          }
         }
       }
     }
@@ -1043,9 +1084,11 @@ class wf_crm_admin_form {
             'js_select' => $this->addToggle($fs1),
           );
           $this->addDynamicCustomSetting($pos[$fs1], $sid, 'grant', $n);
-          foreach ($set['fields'] as $fid => $field) {
-            $fid = "civicrm_{$n}_grant_1_$fid";
-            $pos[$fs1][$fid] = $this->addItem($fid, $field);
+          if (isset($set['fields'])) {
+            foreach ($set['fields'] as $fid => $field) {
+              $fid = "civicrm_{$n}_grant_1_$fid";
+              $pos[$fs1][$fid] = $this->addItem($fid, $field);
+            }
           }
         }
       }
@@ -1095,6 +1138,12 @@ class wf_crm_admin_form {
       '#default_value' => !empty($this->settings['block_unknown_users']),
       '#description' => t('Only allow users to see this form if they are logged in or following a personalized link from CiviMail.'),
     );
+    $this->form['options']['create_new_relationship'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Create New Relationship'),
+      '#default_value' => !empty($this->settings['create_new_relationship']),
+      '#description' => t('If enabled, only Active relationships will load on the form, and will be updated on Submit. If there are no Active relationships then a new one will be created.'),
+    );
     $this->form['options']['new_contact_source'] = array(
       '#type' => 'textfield',
       '#title' => t('Source Label'),
@@ -1105,6 +1154,9 @@ class wf_crm_admin_form {
     );
   }
 
+  /**
+   * Ajax-loaded mini-forms for the contributions tab.
+   */
   private function checkSubmissionLimit() {
     $webform = &$this->node->webform;
     // If anonymous users don't have access to the form, no need for a warning.
@@ -1140,7 +1192,7 @@ class wf_crm_admin_form {
           ' &nbsp; <button id="configure-submit-limit" type="button">' . t('Configure') . '</button>' .
           '<div id="submit-limit-wrapper" style="display:none">' .
             t('Limit each user to') .
-            ' <input class="form-text" type="number" maxlength="2" size="2" name="submit_limit"> ' .
+            ' <input class="form-text" type="number" min="1" max="99" size="2" name="submit_limit"> ' .
             t('submission(s)') . ' <select class="form-select" name="submit_interval">' .
               '<option value="-1">' .t('ever') . '</option>' .
               '<option value="3600" selected="selected">' .t('every hour') . '</option>' .
@@ -1394,7 +1446,7 @@ class wf_crm_admin_form {
           'civicrm_' . $c . '_contact_1_contact_first_name' => 'create_civicrm_webform_element',
           'civicrm_' . $c . '_contact_1_contact_last_name' => 'create_civicrm_webform_element',
         );
-        $link = array('!link' => 'href="http://wiki.civicrm.org/confluence/display/CRMDOC/Webform+CiviCRM+Integration#WebformCiviCRMIntegration-CloningaContact" target="_blank"');
+        $link = array('!link' => 'href="https://docs.civicrm.org/sysadmin/en/latest/integration/drupal/webform/#cloning-a-contact" target="_blank"');
         backdrop_set_message(t('Tip: Consider using the clone feature to add multiple similar contacts. (<a !link>more info</a>)', $link), 'status', FALSE);
       }
     }
@@ -1603,8 +1655,31 @@ class wf_crm_admin_form {
             $component['value'] = $val;
             webform_component_update($component);
           }
+
+          if (substr($key, -11) === '_createmode') {
+            // Update webform's settings with 'Create mode' value for custom group.
+            $this->settings['data']['config']['create_mode'][$key] = $val;
+          }
+        }
+        // add empty fieldsets for custom civicrm sets with no fields, if "add dynamically" is checked
+        elseif (strpos($key, 'settings_dynamic_custom') && $val == 1) {
+          $emptySets = wf_crm_get_empty_sets();
+          list($ent, $n, , , ,$cgId) = explode('_', $key, 6);
+          $fieldsetKey = "civicrm_{$n}_{$ent}_1_{$cgId}_fieldset";
+          if (array_key_exists($cgId, $emptySets) && !isset($existing[$fieldsetKey])) {
+            $fieldset = array (
+              'nid' => $nid,
+              'pid' => 0,
+              'form_key' => $fieldsetKey,
+              'name' => $emptySets[$cgId]['label'],
+              'type' => 'fieldset',
+              'weight' => $i,
+            );
+            webform_component_insert($fieldset);
+          }
         }
       }
+
       if (count($created) == 1) {
         backdrop_set_message(t('Added field: %name', array('%name' => $created[0])));
       }
@@ -1629,6 +1704,7 @@ class wf_crm_admin_form {
         }
       }
     }
+
     // Make sure the updates are visible to anonymous users.
     cache_clear_all();
 
@@ -1657,22 +1733,27 @@ class wf_crm_admin_form {
       'nid' => $this->node->nid,
       'rgid' => $rgid,
       'weight' => $weight,
-      'target' => $enabled[$field['form_key']],
-      'target_type' => 'component',
+      'actions' => array(
+        array(
+          'target' => $enabled[$field['form_key']],
+          'target_type' => 'component',
+          'action' => $field['civicrm_condition']['action'],
+        ),
+      ),
     );
     $rule_group['rules'] = array();
-    foreach ($field['civicrm_condition']['rules'] as $source => $conditions) {
+    foreach ($field['civicrm_condition']['rules'] as $source => $condition) {
       $source_key = "civicrm_{$c}_{$ent}_{$n}_{$source}";
       $source_id = wf_crm_aval($enabled, $source_key);
       if ($source_id) {
         $options = wf_crm_field_options(array('form_key' => $source_key), '', $this->settings['data']);
-        foreach ($conditions as $condition) {
-          if (isset($options[$condition])) {
+        foreach ((array) $condition['values'] as $value) {
+          if (isset($options[$value])) {
             $rule_group['rules'][] = array(
               'source_type' => 'component',
               'source' => $source_id,
-              'operator' => 'equal',
-              'value' => $condition,
+              'operator' => wf_crm_aval($condition, 'operator', 'equal'),
+              'value' => $value,
             );
           }
         }
@@ -1700,6 +1781,9 @@ class wf_crm_admin_form {
       $val = (array) wf_crm_aval($this->settings, $key);
       if (((in_array('create_civicrm_webform_element', $val, TRUE)) && $this->settings['nid'])
         || strpos($key, 'fieldset') !== FALSE) {
+        unset($fields[$key]);
+      }
+      elseif (substr($key, -11) === '_createmode') {
         unset($fields[$key]);
       }
       else {
@@ -1827,7 +1911,16 @@ class wf_crm_admin_form {
    */
   public static function addFieldset($c, &$field, &$enabled, $settings, $ent = 'contact', $allow_create = FALSE) {
     $type = in_array($ent, self::$fieldset_entities) ? $ent : 'contact';
-    $sid = "civicrm_{$c}_{$type}_1_fieldset_fieldset";
+    // Custom fields are placed in fieldsets by group (for contact fields only)
+    if (strpos($field['form_key'], '_custom_') && $type == 'contact') {
+      $sid = explode('_custom', $field['form_key']);
+      $sid = $sid[0] . '_fieldset';
+      $customGroupKey = explode('_', $field['form_key'])[4];
+      $allow_create = $isCustom = TRUE;
+    }
+    else {
+      $sid = "civicrm_{$c}_{$type}_1_fieldset_fieldset";
+    }
     if (!empty($settings['create_fieldsets']) && !isset($enabled[$sid]) && $allow_create) {
       $new_set = array(
         'nid' => $field['nid'],
@@ -1835,11 +1928,15 @@ class wf_crm_admin_form {
         'type' => 'fieldset',
         'weight' => $c,
       );
-      if ($type == 'contact') {
+      $sets = wf_crm_get_fields('sets');
+      if (isset($isCustom)) {
+        $new_set['name'] = $sets[$customGroupKey]['label'];
+        $new_set['weight'] = 200 + (array_search($type, self::$fieldset_entities) * 10 + $c);
+      }
+      elseif ($type == 'contact') {
         $new_set['name'] = wf_crm_contact_label($c, $settings['data']);
       }
       else {
-        $sets = wf_crm_get_fields('sets');
         $new_set['name'] = $sets[$type]['label'] . ($c > 1 ? " $c" : '');
         $new_set['weight'] = 200 + (array_search($type, self::$fieldset_entities) * 10 + $c);
       }
@@ -1941,6 +2038,8 @@ class wf_crm_admin_form {
     foreach ($webforms as $webform) {
       $field_name = "cg{$gid}_custom_$fid";
       $field_info = wf_crm_get_field($field_name);
+      // $field_info contains old data, so re-fetch
+      $fieldConfigs = wf_civicrm_api('CustomField', 'getsingle', array('id' => $fid));
       // Reset node cache to avoid stale data, so as not to insert the same component twice
       $node = node_load($webform->nid, NULL, TRUE);
       $enabled = wf_crm_enabled_fields($node, NULL, TRUE);
@@ -1951,15 +2050,15 @@ class wf_crm_admin_form {
           if ($pieces = wf_crm_explode_key($component['form_key'])) {
             list(, $c, $ent, $n, $table, $name) = $pieces;
             if (!empty($node->webform_civicrm['data'][$ent][$c]["dynamic_custom_cg$gid"])) {
-              if ($op == 'delete') {
+              if ($op == 'delete' || $op == 'disable') {
                 webform_component_delete($node, $component);
               }
-              else {
-                $component['name'] = $field_info['name'];
-                $component['required'] = $field_info['required'];
-                $component['value'] = $field_info['value'];
-                $component['extra']['description'] = $field_info['extra']['description'];
-                $component['extra']['description_above'] = $field_info['extra']['description_above'];
+              elseif (isset($field_info)) {
+                $component['name'] = $fieldConfigs['label'];
+                $component['required'] = $fieldConfigs['is_required'];
+                $component['value'] = $fieldConfigs['default_value'] ? $fieldConfigs['default_value'] : "";
+                $component['extra']['description'] = $fieldConfigs['help_pre'] ?  $fieldConfigs['help_pre'] : "";
+                $component['extra']['description_above'] = $field_info['extra']['description_above'];;
                 webform_component_update($component);
               }
               $updated[$ent][$c] = 1;
@@ -1968,7 +2067,7 @@ class wf_crm_admin_form {
         }
       }
       // Handle create new components
-      if ($op == 'create') {
+      if ($op == 'create' || $op == 'enable') {
         $ent = $sets["cg$gid"]['entity_type'];
         foreach ($node->webform_civicrm['data'][$ent] as $c => $item) {
           if (!empty($item["dynamic_custom_cg$gid"]) && empty($updated[$ent][$c])) {
@@ -1981,6 +2080,15 @@ class wf_crm_admin_form {
                 $new['weight'] = $component['weight'] + 1;
                 $new['pid'] = $component['pid'];
               }
+            }
+            if ($op == 'enable') {
+              $new['name'] = $fieldConfigs['label'];
+              $new['required'] = $fieldConfigs['is_required'];
+              $new['value'] = implode(',', wf_crm_explode_multivalue_str($fieldConfigs['default_value']));
+              $new['data_type'] = $fieldConfigs['data_type'];
+
+              $custom_types = wf_crm_custom_types_map_array();
+              $new['type'] = $custom_types[$fieldConfigs['html_type']]['type'];
             }
             wf_crm_admin_form::insertComponent($new, $enabled, $node->webform_civicrm);
           }

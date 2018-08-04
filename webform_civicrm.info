@@ -4,5 +4,5 @@ backdrop = 1.x
 type = module
 package = CiviCRM
 dependencies[] = civicrm
-dependencies[] = webform
+dependencies[] = webform (>=4.12)
 dependencies[] = options_element

@@ -23,7 +23,9 @@ function wf_crm_field_options($field, $context, $data) {
   if ($pieces = wf_crm_explode_key($field['form_key'])) {
     list( , $c, $ent, $n, $table, $name) = $pieces;
     // Ensure we have complete info for this field
-    $field += $fields[$table . '_' . $name];
+    if (isset($fields[$table . '_' . $name])) {
+      $field += $fields[$table . '_' . $name];
+    }
     if ($name === 'contact_sub_type') {
       list($contact_types, $sub_types) = wf_crm_get_contact_types();
       $ret = wf_crm_aval($sub_types, $data['contact'][$c]['contact'][1]['contact_type'], array());
@@ -448,9 +450,22 @@ function wf_crm_enabled_fields($node, $submission = NULL, $show_all = FALSE) {
     $fields = wf_crm_get_fields();
     foreach ($node->webform['components'] as $c) {
       $exp = explode('_', $c['form_key'], 5);
+      $customGroupFieldsetKey = "";
       if (count($exp) == 5) {
         list($lobo, $i, $ent, $n, $id) = $exp;
-        if ((isset($fields[$id]) || $id == 'fieldset_fieldset') && $lobo == 'civicrm' && is_numeric($i) && is_numeric($n)) {
+        if ($lobo != 'civicrm') {
+          continue;
+        }
+        $explodedId = explode('_', $id);
+        if (wf_crm_aval($explodedId, 1) == 'fieldset' && $explodedId[0] != 'fieldset') {
+          $customGroupFieldsetKey = $explodedId[0];
+
+          // Automatically enable 'Create mode' field for Contact's custom group.
+          if ($ent === 'contact') {
+            $enabled[$lobo . '_' . $i . '_' . $ent . '_' . $n . '_' . $customGroupFieldsetKey . '_createmode'] = 1;
+          }
+        }
+        if ((isset($fields[$id]) || $id == 'fieldset_fieldset' || $id == $customGroupFieldsetKey . '_fieldset') && is_numeric($i) && is_numeric($n)) {
           if (!$show_all && ($ent == 'contact' || $ent == 'participant') && empty($node->webform_civicrm['data']['contact'][$i])) {
             continue;
           }
@@ -668,7 +683,7 @@ function wf_crm_get_fields($var = 'fields') {
       'name' => t('Email'),
       'type' => 'email',
     );
-    foreach (array('street_address' => t('Street Address'), 'supplemental_address_1' => t('Street Address # Line 2'), 'supplemental_address_2' => t('Street Address # Line 3'), 'city' => t('City')) as $key => $value) {
+    foreach (array('street_address' => t('Street Address'), 'street_name' => t('Street Name'), 'street_number' => t('Street Number'), 'street_unit' => t('Street Number Suffix'), 'supplemental_address_1' => t('Street Address # Line 2'), 'supplemental_address_2' => t('Street Address # Line 3'), 'city' => t('City')) as $key => $value) {
       $fields['address_' . $key] = array(
         'name' => $value,
         'type' => 'textfield',
@@ -1093,11 +1108,25 @@ function wf_crm_get_fields($var = 'fields') {
         'extra' => array('civicrm_live_options' => 1),
       );
       $fields['membership_status_id'] = array(
-        'name' => t('Membership Status'),
+        'name' => t('Override Status'),
         'type' => 'select',
         'expose_list' => TRUE,
         'value' => 0,
-        'exposed_empty_option' => '- ' . t('Automatic') . ' -',
+        'exposed_empty_option' => '- ' . t('No') . ' -',
+      );
+      $fields['membership_status_override_end_date'] = array(
+        'name' => t('Status Override Until Date'),
+        'type' => 'date',
+        'civicrm_condition' => array(
+          'andor' => 'or',
+          'action' => 'show',
+          'rules' => array(
+            'membership_status_id' => array(
+              'values' => '0',
+              'operator' => 'not_equal',
+            ),
+          ),
+        ),
       );
       $fields['membership_num_terms'] = array(
         'name' => t('Number of Terms'),
@@ -1250,24 +1279,7 @@ function wf_crm_get_fields($var = 'fields') {
     );
 
     // Pull custom fields and match to Webform element types
-    $custom_types = array(
-      'Select' => array('type' => 'select'),
-      'Multi-Select' => array('type' => 'select', 'extra' => array('multiple' => 1)),
-      'AdvMulti-Select' => array('type' => 'select', 'extra' => array('multiple' => 1)),
-      'Radio' => array('type' => 'select', 'extra' => array('aslist' => 0)),
-      'CheckBox' => array('type' => 'select', 'extra' => array('multiple' => 1)),
-      'Text'  => array('type' => 'textfield'),
-      'TextArea' => array('type' => 'textarea'),
-      'RichTextEditor' => array('type' => module_exists('webform_html_textarea') ? 'html_textarea' : 'textarea'),
-      'Select Date' => array('type' => 'date'),
-      'Link'  => array('type' => 'textfield'),
-      'Select Country' => array('type' => 'select'),
-      'Multi-Select Country' => array('type' => 'select', 'extra' => array('multiple' => 1)),
-      'Select State/Province' => array('type' => 'select'),
-      'Multi-Select State/Province' => array('type' => 'select', 'extra' => array('multiple' => 1)),
-      'Autocomplete-Select' => array('type' => 'select'),
-      'File' => array('type' => 'file'),
-    );
+    $custom_types = wf_crm_custom_types_map_array();
     list($contact_types) = wf_crm_get_contact_types();
     $custom_extends = "'" . implode("','", array_keys($contact_types + $sets)) . "'";
     $sql = "
@@ -1280,6 +1292,7 @@ function wf_crm_get_fields($var = 'fields') {
     while ($dao->fetch()) {
       if (isset($custom_types[$dao->html_type])) {
         $set = 'cg' . $dao->custom_group_id;
+        // Place these custom fields directly into their entity
         if ($dao->entity_type == 'address' || $dao->entity_type == 'relationship' || $dao->entity_type == 'membership') {
           $set = $dao->entity_type;
         }
@@ -1328,7 +1341,9 @@ function wf_crm_get_fields($var = 'fields') {
             'andor' => 'or',
             'action' => 'show',
             'rules' => array(
-              'contact_contact_sub_type' => $sets[$set]['sub_types'],
+              'contact_contact_sub_type' => array(
+                'values' => $sets[$set]['sub_types'],
+              ),
             ),
           );
         }
@@ -1363,6 +1378,7 @@ function wf_crm_get_fields($var = 'fields') {
         }
       }
     }
+    $sets += wf_crm_get_empty_sets();
     $dao->free();
   }
   return $$var;
@@ -1650,13 +1666,13 @@ function wf_crm_location_fields() {
  * @return array
  */
 function wf_crm_address_fields() {
-  return array(
-    'street_address',
-    'city',
-    'state_province_id',
-    'country_id',
-    'postal_code'
-  );
+  $fields = array();
+  foreach (array_keys(wf_crm_get_fields()) as $key) {
+    if (strpos($key, 'address') === 0) {
+      $fields[] = substr($key, 8);
+    }
+  }
+  return $fields;
 }
 
 /**
@@ -1695,4 +1711,66 @@ function wf_crm_explode_multivalue_str($str) {
  */
 function wf_crm_is_positive($val) {
   return is_numeric($val) && $val > 0 && round($val) == $val;
+}
+
+/**
+ * Returns empty custom civicrm field sets
+ *
+ * @return array $sets
+ */
+function wf_crm_get_empty_sets() {
+  $sets = array();
+
+  $sql = "SELECT cg.id, cg.title, cg.help_pre, cg.extends, SUM(cf.is_active) as custom_field_sum
+          FROM civicrm_custom_group cg
+          LEFT OUTER JOIN civicrm_custom_field cf
+          ON (cg.id = cf.custom_group_id)
+          GROUP By cg.id";
+
+  $dao = CRM_Core_DAO::executeQuery($sql);
+
+  while($dao->fetch()) {
+    // Because a set with all fields disabled = empty set
+    if (empty($dao->custom_field_sum)) {
+      $set = 'cg' . $dao->id;
+      if ($dao->extends == 'address' || $dao->extends == 'relationship' || $dao->extends == 'membership') {
+        $set = $dao->extends;
+      }
+      $sets[$set] = array(
+        'label' => $dao->title,
+        'entity_type' => strtolower($dao->extends),
+        'help_text' => $dao->help_pre,
+      );
+    }
+  }
+
+  return $sets;
+}
+
+/**
+ * Pull custom fields to match with Webform element types
+ *
+ * @return array
+ */
+function wf_crm_custom_types_map_array() {
+  $custom_types = array(
+    'Select' => array('type' => 'select'),
+    'Multi-Select' => array('type' => 'select', 'extra' => array('multiple' => 1)),
+    'AdvMulti-Select' => array('type' => 'select', 'extra' => array('multiple' => 1)),
+    'Radio' => array('type' => 'select', 'extra' => array('aslist' => 0)),
+    'CheckBox' => array('type' => 'select', 'extra' => array('multiple' => 1)),
+    'Text'  => array('type' => 'textfield'),
+    'TextArea' => array('type' => 'textarea'),
+    'RichTextEditor' => array('type' => module_exists('webform_html_textarea') ? 'html_textarea' : 'textarea'),
+    'Select Date' => array('type' => 'date'),
+    'Link'  => array('type' => 'textfield'),
+    'Select Country' => array('type' => 'select'),
+    'Multi-Select Country' => array('type' => 'select', 'extra' => array('multiple' => 1)),
+    'Select State/Province' => array('type' => 'select'),
+    'Multi-Select State/Province' => array('type' => 'select', 'extra' => array('multiple' => 1)),
+    'Autocomplete-Select' => array('type' => module_exists('webform_autocomplete') ? 'autocomplete' : 'select'),
+    'File' => array('type' => 'file'),
+  );
+
+  return $custom_types;
 }
