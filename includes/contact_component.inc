@@ -41,6 +41,9 @@ function _webform_defaults_civicrm_contact() {
       'default_contact_id' => '',
       'default_relationship' => '',
       'default_relationship_to' => '1',
+      'default_custom_ref' => '',
+      'default_for_case' => '1',
+      'default_case_roles' => '',
       'allow_url_autofill' => TRUE,
       'dupes_allowed' => FALSE,
       'filters' => array(
@@ -238,6 +241,43 @@ function _webform_edit_civicrm_contact($component) {
       '#parents' => array('extra', 'default_relationship'),
     );
   }
+  $custom_ref_options = wf_crm_get_custom_ref_options();
+  if ($custom_ref_options) {
+    $form['defaults']['default']['#options']['custom_ref'] = t('Custom reference field');
+    $form['defaults']['default_custom_ref'] = array(
+      '#type' => 'select',
+      '#title' => t('Specify Custom Field'),
+      '#options' => $custom_ref_options,
+      '#required' => TRUE,
+      '#default_value' => $component['extra']['default_custom_ref'],
+      '#parents' => array('extra', 'default_custom_ref'),
+    );
+  }
+  
+  $case_count = isset($data['case']['number_of_case']) ? $data['case']['number_of_case'] : 0;
+  if ($case_count > 0) {
+    $form['defaults']['default']['#options']['case_roles'] = t('Case roles');
+    $dc = $component['extra']['default_relationship_to'];
+    $form['defaults']['default_for_case'] = array(
+      '#type' => 'select',
+      '#title' => t('For Case'),
+      '#default_value' => $dc,
+      '#parents' => array('extra', 'default_for_case'),
+    );
+    $form['defaults']['default_case_roles'] = array(
+      '#type' => 'select',
+      '#title' => t('Specify Case Role(s)'),
+      '#options' => wf_crm_get_case_roles_options(),
+      '#required' => TRUE,
+      '#default_value' => $component['extra']['default_case_roles'],
+      '#parents' => array('extra', 'default_case_roles'),
+    );
+    $case_type = array();
+    for ($i = 1; $i <= $case_count; $i++) {
+      $form['defaults']['default_for_case']['#options'][$i] = 'Case ' . $i;
+    }
+  }
+
   $form['defaults']['default']['#options']['auto'] = t('Auto - From Filters');
   $form['defaults']['default_contact_id'] = array(
     '#type' => 'textfield',
@@ -852,7 +892,7 @@ function wf_crm_find_relations($cid, $types = array(), $current = TRUE) {
   static $employer_type = 0;
   if ($cid) {
     if (!$employer_type && $current) {
-      $employer_type = CRM_Core_DAO::singleValueQuery("SELECT id FROM civicrm_relationship_type WHERE name_a_b = 'Employee of'");
+      $employer_type = wf_crm_aval(wf_civicrm_api('relationshipType', 'get', array('name_a_b' => 'Employee of', 'return' => 'id')), 'id');
     }
     $type_ids = '';
     foreach ($types as $t) {
@@ -898,6 +938,110 @@ function wf_crm_find_relations($cid, $types = array(), $current = TRUE) {
     $dao->free();
   }
   return $found;
+}
+
+/**
+ * Returns a list of all custom CiviCRM fields of type "ContactReference"
+ *
+ * @return array
+ */
+function wf_crm_get_custom_ref_options() {
+  $filters = array(
+    'sequential' => 1,
+    'return' => ["id", "label"],
+    'data_type' => "ContactReference",
+  );
+  $result = wf_civicrm_api('CustomField', 'get', $filters);
+  $options = array();
+  foreach ($result['values'] as $val) {
+    $options[$val['id']] = $val['label'];
+  }
+  return $options;
+}
+
+/**
+ * Returns ids of all contacts who have reference to given contact via given custom field id
+ *
+ * @param $cid
+ * @param $customFieldID
+ * @return array
+ */
+function wf_crm_find_custom_refs($cid, $customFieldID) {
+  $filters = array(
+    'return' => ['custom_'.$customFieldID],
+    'id' => $cid,
+  );
+  $result = wf_civicrm_api('Contact', 'get', $filters);
+  if (isset($result['values'][$cid]['custom_'.$customFieldID])) {
+    return array($result['values'][$cid]['custom_'.$customFieldID] => $result['values'][$cid]['custom_'.$customFieldID]);
+  }
+  return array();
+}
+
+/**
+ * Returns a list of all case roles
+ *
+ * @return array
+ */
+function wf_crm_get_case_roles_options() {
+  $filters = array(
+    'return' => ["definition"],
+    'options' => ['limit' => 0],
+  );
+  $result = wf_civicrm_api('CaseType', 'get', $filters);
+  $options = array();
+  $options['case_client'] = t('Case Client');
+  foreach ($result['values'] as $k => $val) {
+    if (isset($val['definition']['caseRoles'])) {
+      foreach ($val['definition']['caseRoles'] as $caseRole) {
+        $caseRoleID = wf_civicrm_api('RelationshipType', 'get', array(
+          'sequential' => 1,
+          'return' => ["id", "label_b_a", "label_a_b"],
+          'name_b_a' => $caseRole['name'],
+          'label_b_a' => $caseRole['name'],
+          'options' => ['or' => [["name_b_a", "label_b_a"]]]
+        ))['values'][0];
+        $options[$caseRoleID['id']] = $caseRoleID['label_b_a'];
+      }
+    }
+  }
+  return $options;
+}
+
+/**
+ * Returns ids of all contacts who are related to given contact for given case
+ *
+ * @param $contact_a
+ * @param $case
+ * @param $case_role
+ * @return array
+ */
+function wf_crm_find_case_roles($contact_a, $case, $case_role) {
+  if ($case_role == 'case_client') {
+    // spl handling; this is not a relationship
+    $result = civicrm_api3('Case', 'get', [
+      'sequential' => 1,
+      'id' => $case,
+      'return' => ["contact_id"],
+    ]);
+    if (isset($result['values'][0]['client_id'])) {
+      $firstCaseClient = reset($result['values'][0]['client_id']);
+      return array($firstCaseClient => $firstCaseClient);
+    }
+    return array();
+  }
+  $params = array(
+    'sequential' => 1,
+    'return' => ["contact_id_b"],
+    'relationship_type_id' => $case_role,
+    'contact_id_a' => $contact_a,
+    'case_id' => $case,
+  );
+  $result = wf_civicrm_api('Relationship', 'get', $params);
+  if (isset($result['values'][0]['contact_id_b'])) {
+    return array($result['values'][0]['contact_id_b'] => $result['values'][0]['contact_id_b']);
+  }
+  return array();
 }
 
 /**
@@ -1007,6 +1151,7 @@ function wf_crm_results_display_options($contact_type) {
     'city' => t("City"),
     'county' => t("District/County"),
     'state_province' => t("State/Province"),
+    'street_address' => t("Street Address"),
     'country' => t("Country"),
     'postal_code' => t("Postal Code"),
     'phone' => t("Phone"),

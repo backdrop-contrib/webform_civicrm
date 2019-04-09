@@ -752,6 +752,23 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     $is_primary_address_location_type = wf_crm_aval($contact, 'address:1:location_type_id');
     $is_primary_email_location_type = wf_crm_aval($contact, 'email:1:location_type_id');
 
+    // Fix address fields.
+    if (!empty($contact['address'])) {
+      foreach ($contact['address'] as &$address) {
+        // Translate state/prov abbr to id
+        if (!empty($address['state_province_id'])) {
+          $config = CRM_Core_Config::singleton();
+          if (!($address['state_province_id'] = wf_crm_state_abbr($address['state_province_id'], 'id', wf_crm_aval($address, 'country_id', $config->defaultContactCountry)))) {
+            $address['state_province_id'] = '';
+          }
+        }
+        // Substitute county stub ('-' is a hack to get around required field when there are no available counties)
+        if (isset($address['county_id']) && $address['county_id'] === '-') {
+          $address['county_id'] = '';
+        }
+      }
+    }
+    
     foreach (wf_crm_location_fields() as $location) {
       if (!empty($contact[$location])) {
         $existing = array();
@@ -766,17 +783,6 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
           $existing = array_merge(array(array()), $result['values']);
         }
         foreach ($contact[$location] as $i => $params) {
-          // Translate state/prov abbr to id
-          if (!empty($params['state_province_id'])) {
-            $config = CRM_Core_Config::singleton();
-            if (!($params['state_province_id'] = wf_crm_state_abbr($params['state_province_id'], 'id', wf_crm_aval($params, 'country_id', $config->defaultContactCountry)))) {
-              $params['state_province_id'] = '';
-            }
-          }
-          // Substitute county stub ('-' is a hack to get around required field when there are no available counties)
-          if (isset($params['county_id']) && $params['county_id'] === '-') {
-            $params['county_id'] = '';
-          }
           // Update Backdrop email address
           if ($location == 'email' && !empty($params['email']) && $i == 1) {
             $uid = wf_crm_user_cid($cid, 'contact');
@@ -1187,6 +1193,10 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
       // The api won't let us manually set status without this weird param
       $params['skipStatusCal'] = !empty($params['status_id']);
 
+      if (isset($this->ent['contribution_recur'][1]['id'])) {
+        $params['contribution_recur_id'] = $this->ent['contribution_recur'][1]['id'];
+      }
+
       $result = wf_civicrm_api('membership', 'create', $params);
 
       if (!empty($result['id'])) {
@@ -1299,12 +1309,14 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
           foreach ($params as $param => $val) {
             if ($val && strpos($param, 'role_') === 0) {
               foreach ((array) $params['client_id'] as $client) {
-                wf_civicrm_api('relationship', 'create', array(
-                  'relationship_type_id' => substr($param, 5),
-                  'contact_id_a' => $client,
-                  'contact_id_b' => $val,
-                  'case_id' => $result['id'],
-                ));
+                foreach ((array) $val as $contactB) {
+                  wf_civicrm_api('relationship', 'create', array(
+                    'relationship_type_id' => substr($param, 5),
+                    'contact_id_a' => $client,
+                    'contact_id_b' => $contactB,
+                    'case_id' => $result['id'],
+                  ));
+                }
               }
             }
           }
@@ -1394,15 +1406,15 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
             }
           }
         }
-        $result = wf_civicrm_api('activity', 'create', $params);
+        $activity = wf_civicrm_api('activity', 'create', $params);
         // Final processing if save was successful
-        if (!empty($result['id'])) {
+        if (!empty($activity['id'])) {
           // Store id
-          $this->ent['activity'][$n]['id'] = $result['id'];
+          $this->ent['activity'][$n]['id'] = $activity['id'];
           // Save custom data & attachments
-          $this->saveCustomData($data, $result['id'], 'Activity', FALSE);
+          $this->saveCustomData($data, $activity['id'], 'Activity', FALSE);
           if (isset($data['activityupload'])) {
-            $this->processAttachments('activity', $n, $result['id'], empty($params['id']));
+            $this->processAttachments('activity', $n, $activity['id'], empty($params['id']));
           }
           if (!empty($params['assignee_contact_id'])) {
             if (CRM_Core_BAO_Setting::getItem(CRM_Core_BAO_Setting::SYSTEM_PREFERENCES_NAME, 'activity_assignee_notification')) {
@@ -1417,9 +1429,11 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
                 }
               }
               if ($mail) {
+                $caseId = isset($params['case_id']) ? $params['case_id'] : NULL;
+                $caseClientId = $caseId ? CRM_Utils_Array::first(CRM_Case_BAO_Case::getCaseClients($caseId)) : NULL;
                 // Include attachments while sending a copy of activity.
-                $attachments = CRM_Core_BAO_File::getEntityFile('civicrm_activity', $this->ent['act'][1]);
-                CRM_Case_BAO_Case::sendActivityCopy(NULL, $result['id'], $mail, $attachments, NULL);
+                $attachments = CRM_Core_BAO_File::getEntityFile('civicrm_activity', $activity['id']);
+                CRM_Case_BAO_Case::sendActivityCopy($caseClientId, $activity['id'], $mail, $attachments, $caseId);
               }
             }
           }
@@ -1519,7 +1533,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     if (isset($this->enabled[$fid])) {
       foreach ($this->data['lineitem'][1]['contribution'] as $n => $lineitem) {
         $fid = "civicrm_1_lineitem_{$n}_contribution_line_total";
-        if ($this->getData($fid) > 0) {
+        if ($this->getData($fid) != 0) {
           $this->line_items[] = array(
             'qty' => 1,
             'unit_price' => $lineitem['line_total'],
@@ -1802,6 +1816,7 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     }
 
     $resultRecur = wf_civicrm_api('ContributionRecur', 'create', $contributionRecurParams);
+    $this->ent['contribution_recur'][1]['id'] = $resultRecur['id'];
 
     // Run the Transaction - and Create the Contribution Record - relay Recurring Series information in addition to the already existing Params [and re-key where needed]; at times two keys are required
     $contributionParams['total_amount'] = $contributionFirstAmount;
@@ -1915,6 +1930,14 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     $params['source'] = $this->settings['new_contact_source'];
     $params['item_name'] = $params['description'] = t('Webform Payment: @title', array('@title' => $this->node->title));
 
+    // We need the submitted billing params from the request (Eg. billing_country_id-5)
+    //  because that's how payment processors expect to find them.
+    foreach ($this->form_state['input'] as $formKey => $formValue) {
+      if (substr($formKey, 0, 8) === 'billing_') {
+        $params[$formKey] = $formValue;
+      }
+    }
+
     if (method_exists($paymentProcessor, 'setSuccessUrl')) {
       $paymentProcessor->setSuccessUrl($this->getIpnRedirectUrl('success'));
       $paymentProcessor->setCancelUrl($this->getIpnRedirectUrl('cancel'));
@@ -1925,6 +1948,27 @@ class wf_crm_webform_postprocess extends wf_crm_webform_base {
     $params['webform_redirect_success'] = $this->getIpnRedirectUrl('success');
 
     if (method_exists($paymentProcessor, 'doTransferCheckout')) {
+      //Paypal Express checkout
+      if(wf_crm_aval($_POST, 'credit_card_number') == 'express'){
+        try {
+          $params['button'] = 'express';
+          $params['component'] = 'contribute';
+          $result = $paymentProcessor->doPreApproval($params);
+            if (empty($result)) {
+            // This could happen, for example, when paypal looks at the button value & decides it is not paypal express.
+            return;
+          }
+        }
+        catch (\Civi\Payment\Exception\PaymentProcessorException $e) {
+          backdrop_set_message(ts('Payment approval failed with message :') . $e->getMessage(),'error');
+          CRM_Utils_System::redirect($this->getIpnRedirectUrl('cancel'));
+        }
+        $preApprovalParams = $paymentProcessor->getPreApprovalDetails($result['pre_approval_parameters']);
+        $params = array_merge($params, $preApprovalParams);
+        if (!empty($result['redirect_url'])) {
+          CRM_Utils_System::redirect($result['redirect_url']);
+        }
+      }
       // doTransferCheckout is deprecated but some processors might still implement it.
       // Somewhere around 4.6 it was replaced by doPayment as the method of choice,
       // but to be safe still call it if it exists for now.
