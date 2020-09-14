@@ -20,7 +20,7 @@ class wf_crm_admin_help {
       '<li>' . t('Enable fields for one or more contacts.') . '</li>' .
       '<li>' . t('Arrange and configure those fields on the "Webform" tab.') . '</li>' .
       '<li>' . t('Click the blue help icons to learn more.') . '</li>' .
-      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/drupal/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
+      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/backdrop/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
       '</ul>';
   }
 
@@ -369,6 +369,18 @@ class wf_crm_admin_help {
       t('If a matching activity of the chosen type already exists for Contact 1, it will be autofilled and updated.') .
       '</p><p>' .
       t('Note: an activity can also be autofilled by passing "activity1", etc. in the url.') .
+      '</p>';
+  }
+
+  public static function case_case_type_id() {
+    print '<p>' .
+      t('You can select the case type for your case here, or configure this to be "User Select".') .
+      '</p><p>' .
+      t('When "User Select" is chosen a new Backdrop field component will be added where you can configure the behaviour of this field in more detail.') .
+      '<p></p>' .
+      t('Also note that setting this field will update the case type of any cases which are autoloaded by the form. ').
+      t('This may have undesirable consequences in some situations where, for example, certain custom fields no longer exist on ').
+      t('the new case type and could lead to data being inaccessible within the CiviCase user interface after the case type has changed.').
       '</p>';
   }
 
