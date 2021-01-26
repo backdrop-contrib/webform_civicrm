@@ -20,7 +20,7 @@ class wf_crm_admin_help {
       '<li>' . t('Enable fields for one or more contacts.') . '</li>' .
       '<li>' . t('Arrange and configure those fields on the "Webform" tab.') . '</li>' .
       '<li>' . t('Click the blue help icons to learn more.') . '</li>' .
-      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/drupal/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
+      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/backdrop/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
       '</ul>';
   }
 
@@ -84,7 +84,9 @@ class wf_crm_admin_help {
       '<li>' . t('Select a specific rule to customize how matching is performed.') . '</li>' .
       '<li>' . t('Or select "- None -" to always create a new contact.') . '</li>' .
       '</ul><p>' .
-      t('Note: Matching rules are only used if the contact is not already selected via "Existing Contact" field.') .
+      t('Note: Matching rules are only used if the contact is not already selected via "Existing Contact" field.') . '</p><p>' .
+      t('Note: Contacts are created (using this matching rule) before any other entities are stored as Contacts need to exist before e.g. shared addresses can be processed.') . '</p><p>' .
+      t('Note: Ensure all fields that are configured in your matching rule are added and required on your Webform - else you may get unexpected results') .
       '</p>';
   }
 
@@ -369,6 +371,18 @@ class wf_crm_admin_help {
       t('If a matching activity of the chosen type already exists for Contact 1, it will be autofilled and updated.') .
       '</p><p>' .
       t('Note: an activity can also be autofilled by passing "activity1", etc. in the url.') .
+      '</p>';
+  }
+
+  public static function case_case_type_id() {
+    print '<p>' .
+      t('You can select the case type for your case here, or configure this to be "User Select".') .
+      '</p><p>' .
+      t('When "User Select" is chosen a new Backdrop field component will be added where you can configure the behaviour of this field in more detail.') .
+      '<p></p>' .
+      t('Also note that setting this field will update the case type of any cases which are autoloaded by the form. ').
+      t('This may have undesirable consequences in some situations where, for example, certain custom fields no longer exist on ').
+      t('the new case type and could lead to data being inaccessible within the CiviCase user interface after the case type has changed.').
       '</p>';
   }
 
