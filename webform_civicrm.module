@@ -562,16 +562,6 @@ function webform_civicrm_admin_paths() {
 }
 
 /**
- * Implements hook_help().
- */
-function webform_civicrm_help($section) {
-  if ($section == 'admin/help#webform_civicrm') {
-    // Return a line-break version of the module README.txt
-    return nl2br(file_get_contents(backdrop_get_path('module', 'webform_civicrm') . '/README.txt'));
-  }
-}
-
-/**
  * Implements hook_webform_component_presave().
  * Alter form keys when cloning a contact.
  */
