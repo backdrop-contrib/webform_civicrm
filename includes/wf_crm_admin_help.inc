@@ -20,7 +20,7 @@ class wf_crm_admin_help {
       '<li>' . t('Enable fields for one or more contacts.') . '</li>' .
       '<li>' . t('Arrange and configure those fields on the "Webform" tab.') . '</li>' .
       '<li>' . t('Click the blue help icons to learn more.') . '</li>' .
-      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/drupal/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
+      '<li><a href="https://docs.civicrm.org/sysadmin/en/latest/integration/backdrop/webform/" target="_blank">' . t('Read the instructions.') . '</a></li>' .
       '</ul>';
   }
 
@@ -378,7 +378,7 @@ class wf_crm_admin_help {
     print '<p>' .
       t('You can select the case type for your case here, or configure this to be "User Select".') .
       '</p><p>' .
-      t('When "User Select" is chosen a new Drupal field component will be added where you can configure the behaviour of this field in more detail.') .
+      t('When "User Select" is chosen a new Backdrop field component will be added where you can configure the behaviour of this field in more detail.') .
       '<p></p>' .
       t('Also note that setting this field will update the case type of any cases which are autoloaded by the form. ').
       t('This may have undesirable consequences in some situations where, for example, certain custom fields no longer exist on ').
