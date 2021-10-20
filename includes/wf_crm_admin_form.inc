@@ -1756,9 +1756,7 @@ class wf_crm_admin_form {
     cache_clear_all();
 
     // Clear the entity cache.
-    if (module_exists('entitycache')) {
-      cache_clear_all($nid, 'cache_entity_node');
-    }
+    cache_clear_all($nid, 'cache_entity_node');
   }
 
   /**
