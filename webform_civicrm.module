@@ -366,6 +366,7 @@ function webform_civicrm_webform_submission_render_alter(&$renderable) {
   // Show labels for hidden (select) fields when submissions are rendered.
   foreach ($renderable['#node']->webform['components'] as $component) {
     if ($component['type'] == 'hidden') {
+      module_load_include('inc', 'webform_civicrm', 'includes/utils');
       $options = wf_crm_field_options($component, 'submission', $renderable['#node']->webform_civicrm['data']);
       if (empty($options)) {
         continue;
@@ -1099,7 +1100,7 @@ function webform_civicrm_civicrm_pre($op, $objectName, $id, &$params) {
  * We use it to override the return url so that the user gets redirected to the right place from paypal.
  *
  * Required by (at least) 'Paypal - Website Payments Standard' and 'Redsys'
- * 
+ *
  */
 function webform_civicrm_civicrm_alterPaymentProcessorParams($paymentObj, $rawParams, &$cookedParams) {
   if (!empty($rawParams['webform_redirect_cancel']) && !empty($rawParams['webform_redirect_success'])
